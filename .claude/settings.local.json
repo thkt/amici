@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "additionalDirectories": [
+      "/Users/thkt/GitHub/cli/sae",
+      "/Users/thkt/GitHub/cli/yomu",
+      "/Users/thkt/GitHub/cli/recall",
+      "/Users/thkt/GitHub/cli/rurico"
+    ]
+  }
+}
