@@ -32,4 +32,16 @@ mod tests {
         let result = try_load_reranker_with(|| Ok::<_, &str>(None));
         assert!(matches!(result, ModelLoad::Absent));
     }
+
+    // T-007: cache_check=Err → Failed with error message
+    #[test]
+    fn cache_err_returns_failed() {
+        let result = try_load_reranker_with(|| {
+            Err::<Option<rurico::reranker::Artifacts>, _>("cache broken")
+        });
+        match result {
+            ModelLoad::Failed(msg) => assert!(msg.contains("cache broken")),
+            other => panic!("expected ModelLoad::Failed, got {other:?}"),
+        }
+    }
 }
