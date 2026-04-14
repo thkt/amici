@@ -52,16 +52,18 @@ fn osa_distance(a: &str, b: &str) -> usize {
     let b: Vec<char> = b.chars().collect();
     let (na, nb) = (a.len(), b.len());
     let mut d = vec![vec![0usize; nb + 1]; na + 1];
-    for i in 0..=na {
-        d[i][0] = i;
+    for (i, row) in d.iter_mut().enumerate().take(na + 1) {
+        row[0] = i;
     }
-    for j in 0..=nb {
-        d[0][j] = j;
+    for (j, cell) in d[0].iter_mut().enumerate().take(nb + 1) {
+        *cell = j;
     }
     for i in 1..=na {
         for j in 1..=nb {
             let cost = usize::from(a[i - 1] != b[j - 1]);
-            d[i][j] = (d[i - 1][j] + 1).min(d[i][j - 1] + 1).min(d[i - 1][j - 1] + cost);
+            d[i][j] = (d[i - 1][j] + 1)
+                .min(d[i][j - 1] + 1)
+                .min(d[i - 1][j - 1] + cost);
             if i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1] {
                 d[i][j] = d[i][j].min(d[i - 2][j - 2] + cost);
             }
@@ -84,8 +86,7 @@ mod tests {
     // T-008: 非サブコマンドの query → search を挿入
     #[test]
     fn bare_query_expands_to_search() {
-        let exp =
-            try_expand_shorthand(&os(&["sae", "認証"]), KNOWN, GLOBAL).unwrap();
+        let exp = try_expand_shorthand(&os(&["sae", "認証"]), KNOWN, GLOBAL).unwrap();
         let s: Vec<&str> = exp.iter().filter_map(|a| a.to_str()).collect();
         assert_eq!(s, ["sae", "search", "認証"]);
     }
@@ -93,8 +94,7 @@ mod tests {
     // T-009: global flag は search の前に hoisted
     #[test]
     fn global_flag_hoisted_before_search() {
-        let exp =
-            try_expand_shorthand(&os(&["sae", "--json", "query"]), KNOWN, GLOBAL).unwrap();
+        let exp = try_expand_shorthand(&os(&["sae", "--json", "query"]), KNOWN, GLOBAL).unwrap();
         let s: Vec<&str> = exp.iter().filter_map(|a| a.to_str()).collect();
         assert_eq!(s, ["sae", "--json", "search", "query"]);
     }
@@ -102,9 +102,7 @@ mod tests {
     // T-010: known subcommand → None
     #[test]
     fn known_subcommand_not_expanded() {
-        assert!(
-            try_expand_shorthand(&os(&["sae", "harvest", "foo"]), KNOWN, GLOBAL).is_none()
-        );
+        assert!(try_expand_shorthand(&os(&["sae", "harvest", "foo"]), KNOWN, GLOBAL).is_none());
     }
 
     // T-011: OSA distance=1 の typo → None（typo guard）
@@ -114,5 +112,18 @@ mod tests {
             try_expand_shorthand(&os(&["sae", "serach"]), KNOWN, GLOBAL).is_none(),
             "typo 'serach' (osa=1 from 'search') should not expand"
         );
+    }
+
+    // T-023: global flag と trailing options が両立する（hoisting + 後続 flag 保持）
+    #[test]
+    fn global_flag_hoisted_with_trailing_options() {
+        let exp = try_expand_shorthand(
+            &os(&["sae", "--json", "query", "--limit", "2"]),
+            KNOWN,
+            GLOBAL,
+        )
+        .unwrap();
+        let s: Vec<&str> = exp.iter().filter_map(|a| a.to_str()).collect();
+        assert_eq!(s, ["sae", "--json", "search", "query", "--limit", "2"]);
     }
 }

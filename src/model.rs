@@ -79,7 +79,10 @@ mod tests {
         let probe_called = std::cell::Cell::new(false);
         let result = try_load_model_with(
             || Ok::<Option<i32>, String>(None),
-            |_| { probe_called.set(true); Ok(()) },
+            |_| {
+                probe_called.set(true);
+                Ok(())
+            },
             |_| Ok("model"),
         );
         assert!(matches!(result, ModelLoad::Absent));
@@ -104,7 +107,10 @@ mod tests {
         let result = try_load_model_with(
             || Ok::<Option<i32>, &str>(Some(1)),
             |_| Err("probe error"),
-            |_| { new_called.set(true); Ok("model") },
+            |_| {
+                new_called.set(true);
+                Ok("model")
+            },
         );
         assert!(matches!(result, ModelLoad::Failed(ref m) if m == "probe error"));
         assert!(!new_called.get());

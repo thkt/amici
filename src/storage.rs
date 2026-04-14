@@ -3,7 +3,10 @@ use rusqlite::types::ToSql;
 /// Returns numbered placeholders without parentheses: `"?1, ?2, ?3"` for len=3.
 /// Returns `""` for len=0.
 pub fn in_placeholders(len: usize) -> String {
-    (1..=len).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ")
+    (1..=len)
+        .map(|i| format!("?{i}"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Returns anonymous placeholders without parentheses: `"?, ?, ?"` for n=3.
@@ -80,5 +83,16 @@ mod tests {
         append_eq_filter(&mut sql, &mut params, "p.category", None);
         assert_eq!(sql, "SELECT 1");
         assert!(params.is_empty());
+    }
+
+    // T-017: append_eq_filter を2回連続呼び出し → SQL と params.len が両方正しく積まれる
+    #[test]
+    fn append_eq_filter_two_consecutive_filters() {
+        let mut sql = "SELECT 1".to_string();
+        let mut params: Vec<Box<dyn ToSql>> = Vec::new();
+        append_eq_filter(&mut sql, &mut params, "p.category", Some("book"));
+        append_eq_filter(&mut sql, &mut params, "p.lang", Some("ja"));
+        assert_eq!(sql, "SELECT 1 AND p.category = ? AND p.lang = ?");
+        assert_eq!(params.len(), 2);
     }
 }

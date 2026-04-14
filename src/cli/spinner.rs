@@ -42,7 +42,11 @@ impl Spinner {
             None
         };
 
-        Self { done, message, thread }
+        Self {
+            done,
+            message,
+            thread,
+        }
     }
 
     pub fn set_message(&self, msg: &str) {
@@ -64,10 +68,6 @@ impl Spinner {
 
     /// Stops the spinner silently.
     pub fn cancel(self) {}
-
-    /// Stops the spinner and clears the spinner line.
-    /// Delegates to `Drop::drop` which signals the thread and joins it.
-    pub fn stop(self) {}
 }
 
 impl Drop for Spinner {
@@ -85,13 +85,30 @@ impl Drop for Spinner {
 mod tests {
     use super::*;
 
-    // T-007: stop() 後にバックグラウンドスレッドが停止し done フラグが true になる
+    // T-007: cancel() が Drop をトリガーし done フラグが true になる
     #[test]
-    fn stop_sets_done_flag() {
+    fn cancel_signals_done() {
         let spinner = Spinner::new("loading...");
         let done = Arc::clone(&spinner.done);
-        spinner.stop();
-        // done=true は「停止済み」を意味する（running フラグの否定）
+        spinner.cancel();
         assert!(done.load(Ordering::Relaxed));
+    }
+
+    // T-008: set_message() でメッセージが更新される
+    #[test]
+    fn set_message_updates_message() {
+        let spinner = Spinner::new("initial");
+        spinner.set_message("updated");
+        let msg = spinner.message.lock().unwrap().clone();
+        assert_eq!(msg, "updated");
+        spinner.cancel();
+    }
+
+    // T-009: 非TTY 環境で finish() がパニックしない
+    #[test]
+    fn finish_non_tty_does_not_panic() {
+        // cargo test では stderr は非 TTY → thread が None
+        let spinner = Spinner::new("loading...");
+        spinner.finish("done");
     }
 }

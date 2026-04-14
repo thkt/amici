@@ -30,6 +30,7 @@ pub fn try_load_embedder_with<CE>(
     try_load_embedder_with_fns(
         cache_check,
         on_corrupt,
+        |_| {},
         Embedder::probe,
         Embedder::new,
         Artifacts::delete_files,
@@ -39,6 +40,7 @@ pub fn try_load_embedder_with<CE>(
 fn try_load_embedder_with_fns<A, E, CE>(
     cache_check: impl FnOnce() -> Result<Option<A>, CE>,
     on_corrupt: impl FnOnce(io::Error),
+    on_probe_err: impl FnOnce(EmbedInitError),
     probe_fn: impl FnOnce(&A) -> Result<ProbeStatus, EmbedInitError>,
     new_fn: impl FnOnce(&A) -> Result<E, EmbedInitError>,
     delete_fn: impl FnOnce(A) -> Result<(), io::Error>,
@@ -60,7 +62,10 @@ where
             }
             return Err(DegradedReason::ProbeFailed);
         }
-        Err(_) => return Err(DegradedReason::ProbeFailed),
+        Err(e) => {
+            on_probe_err(e);
+            return Err(DegradedReason::ProbeFailed);
+        }
     }
     match new_fn(&artifacts) {
         Ok(e) => Ok(Arc::new(e) as Arc<dyn Embed>),
@@ -97,6 +102,7 @@ mod tests {
         let result = try_load_embedder_with_fns::<(), StubEmbedder, &str>(
             || Ok(None),
             |_| on_corrupt_called.set(true),
+            |_| unreachable!("on_probe_err must not be called when cache is empty"),
             |_| unreachable!("probe must not be called when cache is empty"),
             |_| unreachable!("new must not be called when cache is empty"),
             |_| unreachable!("delete must not be called when cache is empty"),
@@ -111,6 +117,7 @@ mod tests {
         let result = try_load_embedder_with_fns::<(), StubEmbedder, _>(
             || Err::<Option<()>, _>("cache broken"),
             |_| {},
+            |_| unreachable!("on_probe_err must not be called when cache_check fails"),
             |_| unreachable!("probe must not be called when cache_check fails"),
             |_| unreachable!("new must not be called when cache_check fails"),
             |_| unreachable!("delete must not be called when cache_check fails"),
@@ -124,6 +131,7 @@ mod tests {
         let result = try_load_embedder_with_fns::<(), StubEmbedder, &str>(
             || Ok(Some(())),
             |_| {},
+            |_| unreachable!("on_probe_err must not be called on BackendUnavailable"),
             |_| Ok(ProbeStatus::BackendUnavailable),
             |_| unreachable!("new must not be called when backend unavailable"),
             |_| unreachable!("delete must not be called when backend unavailable"),
@@ -139,6 +147,7 @@ mod tests {
         let result = try_load_embedder_with_fns::<(), StubEmbedder, &str>(
             || Ok(Some(())),
             |_| on_corrupt_called.set(true),
+            |_| unreachable!("on_probe_err must not be called on ModelCorrupt"),
             |_| {
                 Err(EmbedInitError::ModelCorrupt {
                     reason: "bad weights".into(),
@@ -165,6 +174,7 @@ mod tests {
         let result = try_load_embedder_with_fns::<(), StubEmbedder, &str>(
             || Ok(Some(())),
             |e| captured.set(Some(e.to_string())),
+            |_| unreachable!("on_probe_err must not be called on ModelCorrupt"),
             |_| {
                 Err(EmbedInitError::ModelCorrupt {
                     reason: "bad weights".into(),
@@ -187,12 +197,43 @@ mod tests {
         let result = try_load_embedder_with_fns::<(), StubEmbedder, &str>(
             || Ok(Some(())),
             |_| {},
+            |_| unreachable!("on_probe_err must not be called on success"),
             |_| Ok(ProbeStatus::Available),
             |_| Ok(StubEmbedder),
             |_| unreachable!("delete must not be called on success"),
         );
         let embedder = result.expect("loader should succeed");
         assert!(embedder.embed_query("hello").is_ok());
+    }
+
+    // T-107: probe=Backend err → on_probe_err called with error detail
+    #[test]
+    fn t107_probe_backend_err_invokes_on_probe_err() {
+        let captured: Cell<Option<String>> = Cell::new(None);
+        let result = try_load_embedder_with_fns::<(), StubEmbedder, &str>(
+            || Ok(Some(())),
+            |_| unreachable!("on_corrupt must not be called"),
+            |e| captured.set(Some(e.to_string())),
+            |_| Err(EmbedInitError::Backend("spawn failed".into())),
+            |_| unreachable!("new must not be called when probe fails"),
+            |_| unreachable!("delete must not be called on non-corrupt probe error"),
+        );
+        assert_eq!(result.err(), Some(DegradedReason::ProbeFailed));
+        let msg = captured.into_inner().expect("on_probe_err should fire");
+        assert!(
+            msg.contains("spawn failed"),
+            "captured error should carry backend message, got {msg:?}"
+        );
+    }
+
+    // T-108: public wrapper delegates correctly — cache empty → NotInstalled (wiring test)
+    #[test]
+    fn t108_public_wrapper_absent_when_cache_empty() {
+        let result = try_load_embedder_with(
+            || Ok::<Option<Artifacts>, &str>(None),
+            |_| unreachable!("on_corrupt must not be called"),
+        );
+        assert_eq!(result.err(), Some(DegradedReason::NotInstalled));
     }
 
     // T-113: DegradedReason has 4 compile-time exhaustive variants
@@ -225,6 +266,7 @@ mod tests {
             |_| unreachable!(),
             |_| unreachable!(),
             |_| unreachable!(),
+            |_| unreachable!(),
         );
         assert_ne!(a.err(), Some(DegradedReason::Disabled));
 
@@ -235,6 +277,7 @@ mod tests {
             |_| unreachable!(),
             |_| unreachable!(),
             |_| unreachable!(),
+            |_| unreachable!(),
         );
         assert_ne!(b.err(), Some(DegradedReason::Disabled));
 
@@ -242,6 +285,7 @@ mod tests {
         let c = try_load_embedder_with_fns::<(), StubEmbedder, &str>(
             || Ok(Some(())),
             |_| {},
+            |_| unreachable!(),
             |_| Ok(ProbeStatus::BackendUnavailable),
             |_| unreachable!(),
             |_| unreachable!(),
@@ -252,11 +296,8 @@ mod tests {
         let d = try_load_embedder_with_fns::<(), StubEmbedder, &str>(
             || Ok(Some(())),
             |_| {},
-            |_| {
-                Err(EmbedInitError::ModelCorrupt {
-                    reason: "x".into(),
-                })
-            },
+            |_| unreachable!(),
+            |_| Err(EmbedInitError::ModelCorrupt { reason: "x".into() }),
             |_| unreachable!(),
             |_| Ok(()),
         );
@@ -266,6 +307,7 @@ mod tests {
         let e = try_load_embedder_with_fns::<(), StubEmbedder, &str>(
             || Ok(Some(())),
             |_| {},
+            |_| {}, // on_probe_err is called here
             |_| Err(EmbedInitError::Backend("spawn failed".into())),
             |_| unreachable!("new must not be called when probe fails"),
             |_| unreachable!("delete must not be called when probe fails with non-corrupt error"),
@@ -276,6 +318,7 @@ mod tests {
         let f = try_load_embedder_with_fns::<(), StubEmbedder, &str>(
             || Ok(Some(())),
             |_| {},
+            |_| unreachable!(),
             |_| Ok(ProbeStatus::Available),
             |_| Err(EmbedInitError::Backend("alloc failed".into())),
             |_| unreachable!("delete must not be called on new_fn failure"),
@@ -289,6 +332,7 @@ mod tests {
         let result = try_load_embedder_with_fns::<(), StubEmbedder, &str>(
             || Ok(Some(())),
             |_| {},
+            |_| unreachable!("on_probe_err must not be called when probe succeeds"),
             |_| Ok(ProbeStatus::Available),
             |_| Err(EmbedInitError::Backend("alloc failed".into())),
             |_| unreachable!("delete must not be called on new_fn failure"),
