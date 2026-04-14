@@ -110,6 +110,10 @@ mod tests {
         }
     }
 
+    fn cache_present() -> impl FnOnce() -> Result<Option<()>, &'static str> {
+        || Ok(Some(()))
+    }
+
     // T-101: cache_check=Ok(None) → Err(NotInstalled)
     #[test]
     fn t101_cache_none_returns_not_installed() {
@@ -141,8 +145,8 @@ mod tests {
     // T-103: probe=BackendUnavailable → Err(BackendUnavailable)
     #[test]
     fn t103_backend_unavailable_returns_backend_unavailable() {
-        let result = try_load_embedder_with_fns::<(), StubEmbedder, &str>(
-            || Ok(Some(())),
+        let result = try_load_embedder_with_fns::<_, StubEmbedder, _>(
+            cache_present(),
             |_| {},
             |_| unreachable!("on_probe_err must not be called on BackendUnavailable"),
             |_| Ok(ProbeStatus::BackendUnavailable),
@@ -157,8 +161,8 @@ mod tests {
     fn t104_corrupt_delete_ok_skips_on_delete_error() {
         let on_delete_error_called = Cell::new(false);
         let delete_called = Cell::new(false);
-        let result = try_load_embedder_with_fns::<(), StubEmbedder, &str>(
-            || Ok(Some(())),
+        let result = try_load_embedder_with_fns::<_, StubEmbedder, _>(
+            cache_present(),
             |_| on_delete_error_called.set(true),
             |_| unreachable!("on_probe_err must not be called on ModelCorrupt"),
             |_| {
@@ -184,8 +188,8 @@ mod tests {
     #[test]
     fn t105_corrupt_delete_err_invokes_on_delete_error() {
         let captured: Cell<Option<String>> = Cell::new(None);
-        let result = try_load_embedder_with_fns::<(), StubEmbedder, &str>(
-            || Ok(Some(())),
+        let result = try_load_embedder_with_fns::<_, StubEmbedder, _>(
+            cache_present(),
             |e| captured.set(Some(e.to_string())),
             |_| unreachable!("on_probe_err must not be called on ModelCorrupt"),
             |_| {
@@ -207,8 +211,8 @@ mod tests {
     // T-106: cache=Some, probe=Available, new=Ok → Ok(Arc<dyn Embed>)
     #[test]
     fn t106_success_returns_arc_embed() {
-        let result = try_load_embedder_with_fns::<(), StubEmbedder, &str>(
-            || Ok(Some(())),
+        let result = try_load_embedder_with_fns(
+            cache_present(),
             |_| {},
             |_| unreachable!("on_probe_err must not be called on success"),
             |_| Ok(ProbeStatus::Available),
@@ -223,8 +227,8 @@ mod tests {
     #[test]
     fn t107_probe_backend_err_invokes_on_probe_err() {
         let captured: Cell<Option<String>> = Cell::new(None);
-        let result = try_load_embedder_with_fns::<(), StubEmbedder, &str>(
-            || Ok(Some(())),
+        let result = try_load_embedder_with_fns::<_, StubEmbedder, _>(
+            cache_present(),
             |_| unreachable!("on_delete_error must not be called"),
             |e| captured.set(Some(e.to_string())),
             |_| Err(EmbedInitError::Backend("spawn failed".into())),
@@ -296,8 +300,8 @@ mod tests {
         assert_ne!(b.err(), Some(DegradedReason::Disabled));
 
         // Branch C: probe BackendUnavailable → BackendUnavailable
-        let c = try_load_embedder_with_fns::<(), StubEmbedder, &str>(
-            || Ok(Some(())),
+        let c = try_load_embedder_with_fns::<_, StubEmbedder, _>(
+            cache_present(),
             |_| {},
             |_| unreachable!(),
             |_| Ok(ProbeStatus::BackendUnavailable),
@@ -307,8 +311,8 @@ mod tests {
         assert_ne!(c.err(), Some(DegradedReason::Disabled));
 
         // Branch D: probe ModelCorrupt → ProbeFailed
-        let d = try_load_embedder_with_fns::<(), StubEmbedder, &str>(
-            || Ok(Some(())),
+        let d = try_load_embedder_with_fns::<_, StubEmbedder, _>(
+            cache_present(),
             |_| {},
             |_| unreachable!(),
             |_| Err(EmbedInitError::ModelCorrupt { reason: "x".into() }),
@@ -318,8 +322,8 @@ mod tests {
         assert_ne!(d.err(), Some(DegradedReason::Disabled));
 
         // Branch E: probe returns non-corrupt Backend error → ProbeFailed
-        let e = try_load_embedder_with_fns::<(), StubEmbedder, &str>(
-            || Ok(Some(())),
+        let e = try_load_embedder_with_fns::<_, StubEmbedder, _>(
+            cache_present(),
             |_| {},
             |_| {},
             |_| Err(EmbedInitError::Backend("spawn failed".into())),
@@ -329,8 +333,8 @@ mod tests {
         assert_ne!(e.err(), Some(DegradedReason::Disabled));
 
         // Branch F: probe=Available, new_fn returns Err → ProbeFailed
-        let f = try_load_embedder_with_fns::<(), StubEmbedder, &str>(
-            || Ok(Some(())),
+        let f = try_load_embedder_with_fns::<_, StubEmbedder, _>(
+            cache_present(),
             |_| {},
             |_| unreachable!(),
             |_| Ok(ProbeStatus::Available),
@@ -343,8 +347,8 @@ mod tests {
     // T-115: probe=Available, new_fn=Err → Err(ProbeFailed)
     #[test]
     fn t115_new_fn_err_returns_probe_failed() {
-        let result = try_load_embedder_with_fns::<(), StubEmbedder, &str>(
-            || Ok(Some(())),
+        let result = try_load_embedder_with_fns::<_, StubEmbedder, _>(
+            cache_present(),
             |_| {},
             |_| unreachable!("on_probe_err must not be called when probe succeeds"),
             |_| Ok(ProbeStatus::Available),

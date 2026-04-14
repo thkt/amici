@@ -92,6 +92,20 @@ mod tests {
         }
     }
 
+    fn cache_present() -> impl FnOnce() -> Result<Option<()>, &'static str> {
+        || Ok(Some(()))
+    }
+
+    fn assert_failed_containing(result: ModelLoad<Box<dyn Rerank>>, expected: &str) {
+        match result {
+            ModelLoad::Failed(msg) => assert!(
+                msg.contains(expected),
+                "expected message containing {expected:?}, got {msg:?}"
+            ),
+            other => panic!("expected ModelLoad::Failed, got {other:?}"),
+        }
+    }
+
     // T-006: cache_check=Ok(None) → Absent
     #[test]
     fn cache_none_returns_absent() {
@@ -106,17 +120,14 @@ mod tests {
             || Err::<Option<rurico::reranker::Artifacts>, _>("cache broken"),
             |_| unreachable!("on_delete_error must not be called on cache error"),
         );
-        match result {
-            ModelLoad::Failed(msg) => assert!(msg.contains("cache broken")),
-            other => panic!("expected ModelLoad::Failed, got {other:?}"),
-        }
+        assert_failed_containing(result, "cache broken");
     }
 
     // T-008: probe=Available, new=Ok → Ready
     #[test]
     fn probe_available_new_ok_returns_ready() {
-        let result = try_load_reranker_with_fns::<(), _, StubReranker>(
-            || Ok::<Option<()>, &str>(Some(())),
+        let result = try_load_reranker_with_fns(
+            cache_present(),
             |_| unreachable!("on_delete_error must not be called on success"),
             |_| Ok(ProbeStatus::Available),
             |_| Ok(StubReranker),
@@ -128,49 +139,40 @@ mod tests {
     // T-009: probe=BackendUnavailable → Failed("MLX backend is unavailable")
     #[test]
     fn probe_backend_unavailable_returns_failed() {
-        let result = try_load_reranker_with_fns::<(), _, StubReranker>(
-            || Ok::<Option<()>, &str>(Some(())),
+        let result = try_load_reranker_with_fns::<_, _, StubReranker>(
+            cache_present(),
             |_| unreachable!("on_delete_error must not be called on BackendUnavailable"),
             |_| Ok(ProbeStatus::BackendUnavailable),
             |_| unreachable!("new must not be called when backend unavailable"),
             |_| unreachable!("delete must not be called when backend unavailable"),
         );
-        match result {
-            ModelLoad::Failed(msg) => assert!(msg.contains("MLX backend is unavailable")),
-            other => panic!("expected ModelLoad::Failed, got {other:?}"),
-        }
+        assert_failed_containing(result, "MLX backend is unavailable");
     }
 
     // T-010: probe=Err(Backend) → Failed with error message
     #[test]
     fn probe_err_returns_failed() {
-        let result = try_load_reranker_with_fns::<(), _, StubReranker>(
-            || Ok::<Option<()>, &str>(Some(())),
+        let result = try_load_reranker_with_fns::<_, _, StubReranker>(
+            cache_present(),
             |_| unreachable!("on_delete_error must not be called on non-corrupt probe error"),
             |_| Err(RerankerInitError::Backend("probe failed".into())),
             |_| unreachable!("new must not be called when probe fails"),
             |_| unreachable!("delete must not be called on non-corrupt probe error"),
         );
-        match result {
-            ModelLoad::Failed(msg) => assert!(msg.contains("probe failed")),
-            other => panic!("expected ModelLoad::Failed, got {other:?}"),
-        }
+        assert_failed_containing(result, "probe failed");
     }
 
     // T-011: new=Err → Failed with error message
     #[test]
     fn new_err_returns_failed() {
-        let result = try_load_reranker_with_fns::<(), _, StubReranker>(
-            || Ok::<Option<()>, &str>(Some(())),
+        let result = try_load_reranker_with_fns::<_, _, StubReranker>(
+            cache_present(),
             |_| unreachable!("on_delete_error must not be called when probe succeeds"),
             |_| Ok(ProbeStatus::Available),
             |_| Err(RerankerInitError::Backend("alloc failed".into())),
             |_| unreachable!("delete must not be called on new_fn failure"),
         );
-        match result {
-            ModelLoad::Failed(msg) => assert!(msg.contains("alloc failed")),
-            other => panic!("expected ModelLoad::Failed, got {other:?}"),
-        }
+        assert_failed_containing(result, "alloc failed");
     }
 
     // T-012: probe=ModelCorrupt, delete=Ok → on_delete_error NOT called, Failed("model corrupt: ...")
@@ -178,8 +180,8 @@ mod tests {
     fn corrupt_delete_ok_skips_on_delete_error() {
         let on_delete_error_called = Cell::new(false);
         let delete_called = Cell::new(false);
-        let result = try_load_reranker_with_fns::<(), _, StubReranker>(
-            || Ok::<Option<()>, &str>(Some(())),
+        let result = try_load_reranker_with_fns::<_, _, StubReranker>(
+            cache_present(),
             |_| on_delete_error_called.set(true),
             |_| {
                 Err(RerankerInitError::ModelCorrupt {
@@ -192,10 +194,7 @@ mod tests {
                 Ok(())
             },
         );
-        match result {
-            ModelLoad::Failed(msg) => assert!(msg.contains("bad weights")),
-            other => panic!("expected ModelLoad::Failed, got {other:?}"),
-        }
+        assert_failed_containing(result, "bad weights");
         assert!(delete_called.get(), "delete_fn should be called once");
         assert!(
             !on_delete_error_called.get(),
@@ -207,8 +206,8 @@ mod tests {
     #[test]
     fn corrupt_delete_err_invokes_on_delete_error() {
         let captured: Cell<Option<String>> = Cell::new(None);
-        let result = try_load_reranker_with_fns::<(), _, StubReranker>(
-            || Ok::<Option<()>, &str>(Some(())),
+        let result = try_load_reranker_with_fns::<_, _, StubReranker>(
+            cache_present(),
             |e| captured.set(Some(e.to_string())),
             |_| {
                 Err(RerankerInitError::ModelCorrupt {
