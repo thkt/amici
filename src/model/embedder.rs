@@ -7,6 +7,16 @@ pub use super::{DegradedReason, degraded_reason_user_note};
 
 /// Try to load the embedding model.
 ///
+/// # Errors
+///
+/// - [`DegradedReason::NotInstalled`] — `cache_check` returned `Ok(None)`.
+/// - [`DegradedReason::BackendUnavailable`] — the probe reported
+///   `ProbeStatus::BackendUnavailable`.
+/// - [`DegradedReason::ProbeFailed`] — `cache_check` returned `Err(_)`, the
+///   probe reported `ModelCorrupt` (artifacts deleted before returning), the
+///   probe returned another error, or `new_fn` failed. `on_err` is invoked for
+///   probe errors only; it is **not** called for `ModelCorrupt` or `new_fn` errors.
+///
 /// # Corrupt-model handling
 ///
 /// When the probe reports `EmbedInitError::ModelCorrupt`, the loader deletes

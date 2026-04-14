@@ -6,6 +6,16 @@ use crate::model::DegradedReason;
 
 /// Try to load the reranking model.
 ///
+/// # Errors
+///
+/// - [`DegradedReason::NotInstalled`] — `cache_check` returned `Ok(None)`.
+/// - [`DegradedReason::BackendUnavailable`] — the probe reported
+///   `ProbeStatus::BackendUnavailable`.
+/// - [`DegradedReason::ProbeFailed`] — `cache_check` returned `Err(_)`, the
+///   probe reported `ModelCorrupt` (artifacts deleted before returning), the
+///   probe returned another error, or `new_fn` failed. `on_err` is invoked for
+///   probe and `new_fn` errors; it is **not** called for `ModelCorrupt`.
+///
 /// # Corrupt-model handling
 ///
 /// When the probe reports `RerankerInitError::ModelCorrupt`, the loader deletes
@@ -27,7 +37,7 @@ pub fn try_load_reranker_with<CE>(
     )
 }
 
-pub(crate) fn try_load_reranker_with_fns<A, CE, R>(
+fn try_load_reranker_with_fns<A, CE, R>(
     cache_check: impl FnOnce() -> Result<Option<A>, CE>,
     on_delete_error: impl FnOnce(io::Error),
     on_err: impl FnOnce(RerankerInitError),

@@ -26,6 +26,13 @@ pub fn as_sql_params<T: ToSql>(values: &[T]) -> Vec<&dyn ToSql> {
 
 /// Appends ` AND {column} = ?` to `sql` and pushes the value into `params`
 /// when `value` is `Some`. Does nothing when `value` is `None`.
+///
+/// # Security
+///
+/// `column` is interpolated directly into the SQL string without parameterization.
+/// Pass only compile-time-known, trusted column names — never a string derived
+/// from user input. The `value` argument is always bound as a positional
+/// placeholder and is safe.
 pub fn append_eq_filter(
     sql: &mut String,
     params: &mut Vec<Box<dyn ToSql>>,

@@ -2,6 +2,7 @@
 name = "amici"
 version = "0.1.0"
 edition = "2024"
+description = "Shared model-loading, storage helpers, and CLI utilities for the sae/yomu/recall toolchain"
 license = "MIT"
 repository = "https://github.com/thkt/amici"
 
