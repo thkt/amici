@@ -12,16 +12,17 @@ use crate::model::DegradedReason;
 /// - [`DegradedReason::BackendUnavailable`] — the probe reported
 ///   `ProbeStatus::BackendUnavailable`.
 /// - [`DegradedReason::ProbeFailed`] — `cache_check` returned `Err(_)`, the
-///   probe reported `ModelCorrupt` (artifacts deleted before returning), the
-///   probe returned another error, or `new_fn` failed. `on_err` is invoked for
-///   probe and `new_fn` errors; it is **not** called for `ModelCorrupt`.
+///   probe or `new_fn` reported `ModelCorrupt` (artifacts deleted before
+///   returning), the probe returned another error, or `new_fn` failed.
+///   `on_err` is invoked for probe and non-corrupt `new_fn` errors; it is
+///   **not** called for `ModelCorrupt`.
 ///
 /// # Corrupt-model handling
 ///
-/// When the probe reports `RerankerInitError::ModelCorrupt`, the loader deletes
-/// the artifact files so a subsequent call can re-download. If deletion itself
-/// fails, `on_delete_error` is invoked with the `io::Error` so the caller can log
-/// or surface it — this crate never calls tracing directly.
+/// When the probe or `new_fn` reports `RerankerInitError::ModelCorrupt`, the
+/// loader deletes the artifact files so a subsequent call can re-download. If
+/// deletion itself fails, `on_delete_error` is invoked with the `io::Error` so
+/// the caller can log or surface it — this crate never calls tracing directly.
 pub fn try_load_reranker_with<CE>(
     cache_check: impl FnOnce() -> Result<Option<Artifacts>, CE>,
     on_delete_error: impl FnOnce(io::Error),
@@ -69,6 +70,12 @@ where
     }
     match new_fn(&artifacts) {
         Ok(r) => Ok(Box::new(r) as Box<dyn Rerank>),
+        Err(RerankerInitError::ModelCorrupt { .. }) => {
+            if let Err(io_err) = delete_fn(artifacts) {
+                on_delete_error(io_err);
+            }
+            Err(DegradedReason::ProbeFailed)
+        }
         Err(e) => {
             on_err(e);
             Err(DegradedReason::ProbeFailed)
@@ -270,5 +277,40 @@ mod tests {
             |_| unreachable!("on_err must not be called when cache is empty"),
         );
         assert_eq!(result.err(), Some(DegradedReason::NotInstalled));
+    }
+
+    // T-015: probe=Available, new_fn=ModelCorrupt → delete_fn called, on_err NOT called, Err(ProbeFailed)
+    // Note: Reranker::new currently documents only RerankerInitError::Backend, but the type
+    // allows ModelCorrupt; this test defends against future changes in the backend.
+    #[test]
+    fn new_fn_corrupt_deletes_artifacts() {
+        let on_delete_error_called = Cell::new(false);
+        let on_err_called = Cell::new(false);
+        let delete_called = Cell::new(false);
+        let result = try_load_reranker_with_fns::<_, _, StubReranker>(
+            cache_present(),
+            |_| on_delete_error_called.set(true),
+            |_| on_err_called.set(true),
+            |_| Ok(ProbeStatus::Available),
+            |_| {
+                Err(RerankerInitError::ModelCorrupt {
+                    reason: "bad weights".into(),
+                })
+            },
+            |_| {
+                delete_called.set(true);
+                Ok(())
+            },
+        );
+        assert_eq!(result.err(), Some(DegradedReason::ProbeFailed));
+        assert!(delete_called.get(), "delete_fn should be called on new_fn ModelCorrupt");
+        assert!(
+            !on_delete_error_called.get(),
+            "on_delete_error must not be called when delete succeeds"
+        );
+        assert!(
+            !on_err_called.get(),
+            "on_err must not be called on ModelCorrupt"
+        );
     }
 }

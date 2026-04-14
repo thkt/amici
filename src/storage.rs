@@ -30,13 +30,14 @@ pub fn as_sql_params<T: ToSql>(values: &[T]) -> Vec<&dyn ToSql> {
 /// # Security
 ///
 /// `column` is interpolated directly into the SQL string without parameterization.
-/// Pass only compile-time-known, trusted column names — never a string derived
-/// from user input. The `value` argument is always bound as a positional
-/// placeholder and is safe.
+/// The `&'static str` type enforces that only compile-time string literals can be
+/// passed — runtime strings and `format!(...)` results are rejected by the
+/// compiler. The `value` argument is always bound as a positional placeholder and
+/// is safe.
 pub fn append_eq_filter(
     sql: &mut String,
     params: &mut Vec<Box<dyn ToSql>>,
-    column: &str,
+    column: &'static str,
     value: Option<&str>,
 ) {
     if let Some(v) = value {

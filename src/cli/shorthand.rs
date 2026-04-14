@@ -2,8 +2,13 @@ use std::ffi::OsString;
 
 /// Expands shorthand `<bin> "query"` → `<bin> [global_flags] search "query" [rest_flags]`.
 ///
-/// Returns `Some(expanded_args)` when the first positional argument is not a known
-/// subcommand and has OSA distance > 1 from all known subcommands, `None` otherwise.
+/// Returns `Some(expanded_args)` when the first positional argument satisfies all of:
+/// - does not start with `'-'` (not a flag or bare `-`)
+/// - is not `"help"`
+/// - is not a known subcommand (exact match)
+/// - has OSA distance > 1 from every known subcommand (typo guard)
+///
+/// Returns `None` otherwise (known subcommand, flag-like arg, help, or typo).
 pub fn try_expand_shorthand(
     args: &[OsString],
     known_subcommands: &[&str],

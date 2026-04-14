@@ -7,9 +7,15 @@ pub mod reranker;
 /// the loader functions never produce it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DegradedReason {
+    /// Caller explicitly disabled the model (e.g. via an environment variable or config flag).
+    /// The loader functions never return this variant; it is set by the caller.
     Disabled,
+    /// Model artifacts are not present in the local cache. The user must download them first.
     NotInstalled,
+    /// The hardware/OS backend (e.g. MLX) is not available on this machine.
     BackendUnavailable,
+    /// A cache lookup error, model-file corruption, or model-init failure occurred.
+    /// The artifacts may have been deleted automatically to allow re-download.
     ProbeFailed,
 }
 
@@ -24,8 +30,8 @@ impl std::fmt::Display for DegradedReason {
     }
 }
 
-/// Returns a short user-facing note for a degraded embedder, or `None` if no
-/// message should be shown (e.g. the caller explicitly disabled embedding).
+/// Returns a short user-facing note for a degraded model (embedder or reranker),
+/// or `None` if no message should be shown (e.g. the caller explicitly disabled the model).
 pub fn degraded_reason_user_note(reason: DegradedReason) -> Option<&'static str> {
     match reason {
         DegradedReason::Disabled => None,
@@ -38,15 +44,24 @@ pub fn degraded_reason_user_note(reason: DegradedReason) -> Option<&'static str>
     }
 }
 
+/// Outcome of a model-load attempt.
+///
+/// Callers should inspect the variant to handle the `Failed` case — dropping a
+/// `Failed` value silently discards the error message.
+#[must_use = "inspect the variant to handle loading failures"]
 #[derive(Default)]
 pub enum ModelLoad<T> {
+    /// The model loaded successfully and is ready to use.
     Ready(T),
+    /// No model artifacts were found; the model was never installed.
     #[default]
     Absent,
+    /// The model could not be loaded. The `String` contains a human-readable error message.
     Failed(String),
 }
 
 impl<T> ModelLoad<T> {
+    /// Returns `Some(&T)` when the model is [`Ready`](ModelLoad::Ready), `None` otherwise.
     pub fn as_ref(&self) -> Option<&T> {
         match self {
             Self::Ready(v) => Some(v),
@@ -54,6 +69,11 @@ impl<T> ModelLoad<T> {
         }
     }
 
+    /// Prints a user-facing hint or warning to stderr when the model is not ready.
+    ///
+    /// - [`Absent`](ModelLoad::Absent): prints `"Hint: {absent_hint}"`
+    /// - [`Failed`](ModelLoad::Failed): prints `"Warning: {model_label} not available ({error})"`
+    /// - [`Ready`](ModelLoad::Ready): no-op
     pub fn emit_load_hint(&self, absent_hint: &str, model_label: &str) {
         match self {
             Self::Absent => eprintln!("Hint: {absent_hint}"),

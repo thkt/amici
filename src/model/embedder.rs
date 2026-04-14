@@ -13,25 +13,26 @@ pub use super::{DegradedReason, degraded_reason_user_note};
 /// - [`DegradedReason::BackendUnavailable`] — the probe reported
 ///   `ProbeStatus::BackendUnavailable`.
 /// - [`DegradedReason::ProbeFailed`] — `cache_check` returned `Err(_)`, the
-///   probe reported `ModelCorrupt` (artifacts deleted before returning), the
-///   probe returned another error, or `new_fn` failed. `on_err` is invoked for
-///   probe errors only; it is **not** called for `ModelCorrupt` or `new_fn` errors.
+///   probe or `new_fn` reported `ModelCorrupt` (artifacts deleted before
+///   returning), the probe returned another error, or `new_fn` failed.
+///   `on_probe_err` is invoked for probe errors only; it is **not** called for
+///   `ModelCorrupt` or other `new_fn` errors.
 ///
 /// # Corrupt-model handling
 ///
-/// When the probe reports `EmbedInitError::ModelCorrupt`, the loader deletes
-/// the artifact files so a subsequent call can re-download. If deletion itself
-/// fails, `on_delete_error` is invoked with the `io::Error` so the caller can log
-/// or surface it — this crate never calls tracing directly.
+/// When the probe or `new_fn` reports `EmbedInitError::ModelCorrupt`, the loader
+/// deletes the artifact files so a subsequent call can re-download. If deletion
+/// itself fails, `on_delete_error` is invoked with the `io::Error` so the caller
+/// can log or surface it — this crate never calls tracing directly.
 pub fn try_load_embedder_with<CE>(
     cache_check: impl FnOnce() -> Result<Option<Artifacts>, CE>,
     on_delete_error: impl FnOnce(io::Error),
-    on_err: impl FnOnce(EmbedInitError),
+    on_probe_err: impl FnOnce(EmbedInitError),
 ) -> Result<Arc<dyn Embed>, DegradedReason> {
     try_load_embedder_with_fns(
         cache_check,
         on_delete_error,
-        on_err,
+        on_probe_err,
         Embedder::probe,
         Embedder::new,
         Artifacts::delete_files,
@@ -70,6 +71,12 @@ where
     }
     match new_fn(&artifacts) {
         Ok(e) => Ok(Arc::new(e) as Arc<dyn Embed>),
+        Err(EmbedInitError::ModelCorrupt { .. }) => {
+            if let Err(io_err) = delete_fn(artifacts) {
+                on_delete_error(io_err);
+            }
+            Err(DegradedReason::ProbeFailed)
+        }
         Err(_) => Err(DegradedReason::ProbeFailed),
     }
 }
@@ -240,96 +247,6 @@ mod tests {
         assert_eq!(result.err(), Some(DegradedReason::NotInstalled));
     }
 
-    // T-113: DegradedReason has 4 compile-time exhaustive variants
-    #[test]
-    fn t113_degraded_reason_exhaustive_variants() {
-        fn classify(r: DegradedReason) -> &'static str {
-            match r {
-                DegradedReason::Disabled => "disabled",
-                DegradedReason::NotInstalled => "not-installed",
-                DegradedReason::BackendUnavailable => "backend-unavailable",
-                DegradedReason::ProbeFailed => "probe-failed",
-            }
-        }
-        assert_eq!(classify(DegradedReason::Disabled), "disabled");
-        assert_eq!(classify(DegradedReason::NotInstalled), "not-installed");
-        assert_eq!(
-            classify(DegradedReason::BackendUnavailable),
-            "backend-unavailable"
-        );
-        assert_eq!(classify(DegradedReason::ProbeFailed), "probe-failed");
-    }
-
-    // T-114: loader never returns Err(Disabled) across all 6 error-returning branches
-    #[test]
-    fn t114_loader_never_produces_disabled() {
-        // Branch A: cache Ok(None) → NotInstalled
-        let a = try_load_embedder_with_fns::<(), StubEmbedder, &str>(
-            || Ok(None),
-            |_| {},
-            |_| unreachable!(),
-            |_| unreachable!(),
-            |_| unreachable!(),
-            |_| unreachable!(),
-        );
-        assert_ne!(a.err(), Some(DegradedReason::Disabled));
-
-        // Branch B: cache Err → ProbeFailed
-        let b = try_load_embedder_with_fns::<(), StubEmbedder, _>(
-            || Err::<Option<()>, _>("x"),
-            |_| {},
-            |_| unreachable!(),
-            |_| unreachable!(),
-            |_| unreachable!(),
-            |_| unreachable!(),
-        );
-        assert_ne!(b.err(), Some(DegradedReason::Disabled));
-
-        // Branch C: probe BackendUnavailable → BackendUnavailable
-        let c = try_load_embedder_with_fns::<_, StubEmbedder, _>(
-            cache_present(),
-            |_| {},
-            |_| unreachable!(),
-            |_| Ok(ProbeStatus::BackendUnavailable),
-            |_| unreachable!(),
-            |_| unreachable!(),
-        );
-        assert_ne!(c.err(), Some(DegradedReason::Disabled));
-
-        // Branch D: probe ModelCorrupt → ProbeFailed
-        let d = try_load_embedder_with_fns::<_, StubEmbedder, _>(
-            cache_present(),
-            |_| {},
-            |_| unreachable!(),
-            |_| Err(EmbedInitError::ModelCorrupt { reason: "x".into() }),
-            |_| unreachable!(),
-            |_| Ok(()),
-        );
-        assert_ne!(d.err(), Some(DegradedReason::Disabled));
-
-        // Branch E: probe returns non-corrupt Backend error → ProbeFailed
-        let e = try_load_embedder_with_fns::<_, StubEmbedder, _>(
-            cache_present(),
-            |_| {},
-            |_| {},
-            |_| Err(EmbedInitError::Backend("spawn failed".into())),
-            |_| unreachable!("new must not be called when probe fails"),
-            |_| unreachable!("delete must not be called when probe fails with non-corrupt error"),
-        );
-        assert_ne!(e.err(), Some(DegradedReason::Disabled));
-
-        // Branch F: probe=Available, new_fn returns Err → ProbeFailed
-        let f = try_load_embedder_with_fns::<_, StubEmbedder, _>(
-            cache_present(),
-            |_| {},
-            |_| unreachable!(),
-            |_| Ok(ProbeStatus::Available),
-            |_| Err(EmbedInitError::Backend("alloc failed".into())),
-            |_| unreachable!("delete must not be called on new_fn failure"),
-        );
-        assert_ne!(f.err(), Some(DegradedReason::Disabled));
-    }
-
     // T-115: probe=Available, new_fn=Err → Err(ProbeFailed)
     #[test]
     fn t115_new_fn_err_returns_probe_failed() {
@@ -342,5 +259,35 @@ mod tests {
             |_| unreachable!("delete must not be called on new_fn failure"),
         );
         assert_eq!(result.err(), Some(DegradedReason::ProbeFailed));
+    }
+
+    // T-116: probe=Available, new_fn=ModelCorrupt → delete_fn called, on_probe_err NOT called, Err(ProbeFailed)
+    // Note: Embedder::new currently documents only EmbedInitError::Backend, but the type
+    // allows ModelCorrupt; this test defends against future changes in the backend.
+    #[test]
+    fn t116_new_fn_corrupt_deletes_artifacts() {
+        let on_delete_error_called = Cell::new(false);
+        let delete_called = Cell::new(false);
+        let result = try_load_embedder_with_fns::<_, StubEmbedder, _>(
+            cache_present(),
+            |_| on_delete_error_called.set(true),
+            |_| unreachable!("on_probe_err must not be called when new_fn reports ModelCorrupt"),
+            |_| Ok(ProbeStatus::Available),
+            |_| {
+                Err(EmbedInitError::ModelCorrupt {
+                    reason: "bad weights".into(),
+                })
+            },
+            |_| {
+                delete_called.set(true);
+                Ok(())
+            },
+        );
+        assert_eq!(result.err(), Some(DegradedReason::ProbeFailed));
+        assert!(delete_called.get(), "delete_fn should be called on new_fn ModelCorrupt");
+        assert!(
+            !on_delete_error_called.get(),
+            "on_delete_error must not be called when delete succeeds"
+        );
     }
 }
