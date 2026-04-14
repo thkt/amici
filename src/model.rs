@@ -1,6 +1,43 @@
 pub mod embedder;
 pub mod reranker;
 
+/// Reason a model could not be loaded.
+///
+/// `Disabled` is reserved for caller-level opt-out (e.g. an environment variable);
+/// the loader functions never produce it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DegradedReason {
+    Disabled,
+    NotInstalled,
+    BackendUnavailable,
+    ProbeFailed,
+}
+
+impl std::fmt::Display for DegradedReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DegradedReason::Disabled => write!(f, "disabled"),
+            DegradedReason::NotInstalled => write!(f, "not installed"),
+            DegradedReason::BackendUnavailable => write!(f, "MLX backend unavailable"),
+            DegradedReason::ProbeFailed => write!(f, "probe failed"),
+        }
+    }
+}
+
+/// Returns a short user-facing note for a degraded embedder, or `None` if no
+/// message should be shown (e.g. the caller explicitly disabled embedding).
+pub fn degraded_reason_user_note(reason: DegradedReason) -> Option<&'static str> {
+    match reason {
+        DegradedReason::Disabled => None,
+        DegradedReason::NotInstalled => {
+            Some("embedding model not installed; results from text search only")
+        }
+        DegradedReason::BackendUnavailable | DegradedReason::ProbeFailed => {
+            Some("embedding model unavailable; results from text search only")
+        }
+    }
+}
+
 #[derive(Default)]
 pub enum ModelLoad<T> {
     Ready(T),

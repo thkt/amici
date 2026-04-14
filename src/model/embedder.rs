@@ -3,31 +3,7 @@ use std::sync::Arc;
 
 use rurico::embed::{Artifacts, Embed, EmbedInitError, Embedder, ProbeStatus};
 
-/// Reason the embedder could not be loaded.
-///
-/// `Disabled` is reserved for caller-level opt-out (e.g. an environment variable);
-/// [`try_load_embedder_with`] never produces it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DegradedReason {
-    Disabled,
-    NotInstalled,
-    BackendUnavailable,
-    ProbeFailed,
-}
-
-/// Returns a short user-facing note for a degraded embedder, or `None` if no
-/// message should be shown (e.g. the caller explicitly disabled embedding).
-pub fn degraded_reason_user_note(reason: DegradedReason) -> Option<&'static str> {
-    match reason {
-        DegradedReason::Disabled => None,
-        DegradedReason::NotInstalled => {
-            Some("embedding model not installed; results from text search only")
-        }
-        DegradedReason::BackendUnavailable | DegradedReason::ProbeFailed => {
-            Some("embedding model unavailable; results from text search only")
-        }
-    }
-}
+pub use super::{DegradedReason, degraded_reason_user_note};
 
 /// Try to load the embedding model.
 ///
