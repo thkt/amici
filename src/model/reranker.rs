@@ -10,18 +10,18 @@ use crate::model::ModelLoad;
 ///
 /// When the probe reports `RerankerInitError::ModelCorrupt`, the loader deletes
 /// the artifact files so a subsequent call can re-download. If deletion itself
-/// fails, `on_corrupt` is invoked with the `io::Error` so the caller can log
+/// fails, `on_delete_error` is invoked with the `io::Error` so the caller can log
 /// or surface it — this crate never calls tracing directly.
 pub fn try_load_reranker_with<CE>(
     cache_check: impl FnOnce() -> Result<Option<Artifacts>, CE>,
-    on_corrupt: impl FnOnce(io::Error),
+    on_delete_error: impl FnOnce(io::Error),
 ) -> ModelLoad<Box<dyn Rerank>>
 where
     CE: std::fmt::Display,
 {
     try_load_reranker_with_fns(
         cache_check,
-        on_corrupt,
+        on_delete_error,
         Reranker::probe,
         Reranker::new,
         Artifacts::delete_files,
@@ -30,7 +30,7 @@ where
 
 pub(crate) fn try_load_reranker_with_fns<A, CE, R>(
     cache_check: impl FnOnce() -> Result<Option<A>, CE>,
-    on_corrupt: impl FnOnce(io::Error),
+    on_delete_error: impl FnOnce(io::Error),
     probe_fn: impl FnOnce(&A) -> Result<ProbeStatus, RerankerInitError>,
     new_fn: impl FnOnce(&A) -> Result<R, RerankerInitError>,
     delete_fn: impl FnOnce(A) -> Result<(), io::Error>,
@@ -51,7 +51,7 @@ where
         }
         Err(RerankerInitError::ModelCorrupt { reason }) => {
             if let Err(io_err) = delete_fn(artifacts) {
-                on_corrupt(io_err);
+                on_delete_error(io_err);
             }
             return ModelLoad::Failed(format!("model corrupt: {reason}"));
         }
@@ -104,7 +104,7 @@ mod tests {
     fn cache_err_returns_failed() {
         let result = try_load_reranker_with(
             || Err::<Option<rurico::reranker::Artifacts>, _>("cache broken"),
-            |_| unreachable!("on_corrupt must not be called on cache error"),
+            |_| unreachable!("on_delete_error must not be called on cache error"),
         );
         match result {
             ModelLoad::Failed(msg) => assert!(msg.contains("cache broken")),
@@ -117,7 +117,7 @@ mod tests {
     fn probe_available_new_ok_returns_ready() {
         let result = try_load_reranker_with_fns::<(), _, StubReranker>(
             || Ok::<Option<()>, &str>(Some(())),
-            |_| unreachable!("on_corrupt must not be called on success"),
+            |_| unreachable!("on_delete_error must not be called on success"),
             |_| Ok(ProbeStatus::Available),
             |_| Ok(StubReranker),
             |_| unreachable!("delete must not be called on success"),
@@ -130,7 +130,7 @@ mod tests {
     fn probe_backend_unavailable_returns_failed() {
         let result = try_load_reranker_with_fns::<(), _, StubReranker>(
             || Ok::<Option<()>, &str>(Some(())),
-            |_| unreachable!("on_corrupt must not be called on BackendUnavailable"),
+            |_| unreachable!("on_delete_error must not be called on BackendUnavailable"),
             |_| Ok(ProbeStatus::BackendUnavailable),
             |_| unreachable!("new must not be called when backend unavailable"),
             |_| unreachable!("delete must not be called when backend unavailable"),
@@ -146,7 +146,7 @@ mod tests {
     fn probe_err_returns_failed() {
         let result = try_load_reranker_with_fns::<(), _, StubReranker>(
             || Ok::<Option<()>, &str>(Some(())),
-            |_| unreachable!("on_corrupt must not be called on non-corrupt probe error"),
+            |_| unreachable!("on_delete_error must not be called on non-corrupt probe error"),
             |_| Err(RerankerInitError::Backend("probe failed".into())),
             |_| unreachable!("new must not be called when probe fails"),
             |_| unreachable!("delete must not be called on non-corrupt probe error"),
@@ -162,7 +162,7 @@ mod tests {
     fn new_err_returns_failed() {
         let result = try_load_reranker_with_fns::<(), _, StubReranker>(
             || Ok::<Option<()>, &str>(Some(())),
-            |_| unreachable!("on_corrupt must not be called when probe succeeds"),
+            |_| unreachable!("on_delete_error must not be called when probe succeeds"),
             |_| Ok(ProbeStatus::Available),
             |_| Err(RerankerInitError::Backend("alloc failed".into())),
             |_| unreachable!("delete must not be called on new_fn failure"),
@@ -173,14 +173,14 @@ mod tests {
         }
     }
 
-    // T-012: probe=ModelCorrupt, delete=Ok → on_corrupt NOT called, Failed("model corrupt: ...")
+    // T-012: probe=ModelCorrupt, delete=Ok → on_delete_error NOT called, Failed("model corrupt: ...")
     #[test]
-    fn corrupt_delete_ok_skips_on_corrupt() {
-        let on_corrupt_called = Cell::new(false);
+    fn corrupt_delete_ok_skips_on_delete_error() {
+        let on_delete_error_called = Cell::new(false);
         let delete_called = Cell::new(false);
         let result = try_load_reranker_with_fns::<(), _, StubReranker>(
             || Ok::<Option<()>, &str>(Some(())),
-            |_| on_corrupt_called.set(true),
+            |_| on_delete_error_called.set(true),
             |_| {
                 Err(RerankerInitError::ModelCorrupt {
                     reason: "bad weights".into(),
@@ -198,14 +198,14 @@ mod tests {
         }
         assert!(delete_called.get(), "delete_fn should be called once");
         assert!(
-            !on_corrupt_called.get(),
-            "on_corrupt must not be called when delete succeeds"
+            !on_delete_error_called.get(),
+            "on_delete_error must not be called when delete succeeds"
         );
     }
 
-    // T-013: probe=ModelCorrupt, delete=Err(io::Error) → on_corrupt called, Failed
+    // T-013: probe=ModelCorrupt, delete=Err(io::Error) → on_delete_error called, Failed
     #[test]
-    fn corrupt_delete_err_invokes_on_corrupt() {
+    fn corrupt_delete_err_invokes_on_delete_error() {
         let captured: Cell<Option<String>> = Cell::new(None);
         let result = try_load_reranker_with_fns::<(), _, StubReranker>(
             || Ok::<Option<()>, &str>(Some(())),
@@ -219,7 +219,7 @@ mod tests {
             |_| Err(io::Error::other("disk full")),
         );
         assert!(matches!(result, ModelLoad::Failed(_)));
-        let msg = captured.into_inner().expect("on_corrupt should fire");
+        let msg = captured.into_inner().expect("on_delete_error should fire");
         assert!(
             msg.contains("disk full"),
             "captured error should carry io message, got {msg:?}"
