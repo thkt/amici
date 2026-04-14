@@ -9,20 +9,12 @@ pub fn try_expand_shorthand(
     known_subcommands: &[&str],
     global_flags: &[&str],
 ) -> Option<Vec<OsString>> {
-    let positional_count = args
-        .iter()
-        .filter(|a| !a.to_str().is_some_and(|s| s.starts_with('-')))
-        .count();
-
-    if positional_count < 2 {
-        return None;
-    }
-
-    let (flags, rest): (Vec<_>, Vec<_>) = args
+    let (flag_pairs, indexed_rest): (Vec<_>, Vec<_>) = args
         .iter()
         .enumerate()
         .partition(|(i, a)| *i > 0 && a.to_str().is_some_and(|s| global_flags.contains(&s)));
-    let rest: Vec<&OsString> = rest.into_iter().map(|(_, a)| a).collect();
+    let rest: Vec<&OsString> = indexed_rest.into_iter().map(|(_, a)| a).collect();
+    let flags: Vec<&OsString> = flag_pairs.into_iter().map(|(_, a)| a).collect();
 
     if rest.len() >= 2
         && let Some(first_arg) = rest[1].to_str()
@@ -34,13 +26,9 @@ pub fn try_expand_shorthand(
             .any(|k| osa_distance(first_arg, k) <= 1)
     {
         let mut expanded: Vec<OsString> = vec![rest[0].clone()];
-        for (_, f) in &flags {
-            expanded.push((*f).clone());
-        }
+        expanded.extend(flags.into_iter().cloned());
         expanded.push("search".into());
-        for arg in &rest[1..] {
-            expanded.push((*arg).clone());
-        }
+        expanded.extend(rest[1..].iter().copied().cloned());
         Some(expanded)
     } else {
         None
