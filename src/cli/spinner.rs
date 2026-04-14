@@ -66,7 +66,7 @@ impl Spinner {
         }
     }
 
-    /// Stops the spinner silently.
+    /// Stops the spinner silently by consuming it, triggering `Drop`.
     pub fn cancel(self) {}
 }
 
@@ -107,7 +107,6 @@ mod tests {
     // T-009: 非TTY 環境で finish() がパニックしない
     #[test]
     fn finish_non_tty_does_not_panic() {
-        // cargo test では stderr は非 TTY → thread が None
         let spinner = Spinner::new("loading...");
         spinner.finish("done");
     }

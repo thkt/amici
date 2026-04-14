@@ -26,11 +26,12 @@ pub enum DegradedReason {
 pub fn try_load_embedder_with<CE>(
     cache_check: impl FnOnce() -> Result<Option<Artifacts>, CE>,
     on_corrupt: impl FnOnce(io::Error),
+    on_err: impl FnOnce(EmbedInitError),
 ) -> Result<Arc<dyn Embed>, DegradedReason> {
     try_load_embedder_with_fns(
         cache_check,
         on_corrupt,
-        |_| {},
+        on_err,
         Embedder::probe,
         Embedder::new,
         Artifacts::delete_files,
@@ -232,6 +233,7 @@ mod tests {
         let result = try_load_embedder_with(
             || Ok::<Option<Artifacts>, &str>(None),
             |_| unreachable!("on_corrupt must not be called"),
+            |_| unreachable!("on_err must not be called when cache is empty"),
         );
         assert_eq!(result.err(), Some(DegradedReason::NotInstalled));
     }
@@ -307,7 +309,7 @@ mod tests {
         let e = try_load_embedder_with_fns::<(), StubEmbedder, &str>(
             || Ok(Some(())),
             |_| {},
-            |_| {}, // on_probe_err is called here
+            |_| {},
             |_| Err(EmbedInitError::Backend("spawn failed".into())),
             |_| unreachable!("new must not be called when probe fails"),
             |_| unreachable!("delete must not be called when probe fails with non-corrupt error"),
