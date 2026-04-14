@@ -1,3 +1,4 @@
+pub mod embedder;
 pub mod reranker;
 
 #[derive(Default)]
