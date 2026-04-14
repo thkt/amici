@@ -7,5 +7,5 @@ license = "MIT"
 repository = "https://github.com/thkt/amici"
 
 [dependencies]
-rurico   = { git = "https://github.com/thkt/rurico", rev = "03275f7" }
+rurico   = { git = "https://github.com/thkt/rurico", rev = "216f25f" }
 rusqlite = { version = "0.39", features = ["bundled"] }
