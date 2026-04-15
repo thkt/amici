@@ -1,4 +1,6 @@
-/target
-/workspace/
-/.claude/
-/docs/
+.yomu/
+.claude/
+.playwright-cli/
+docs/
+target/
+workspace/
