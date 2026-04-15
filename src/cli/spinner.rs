@@ -26,7 +26,7 @@ impl Spinner {
     }
 
     /// Creates a spinner with an explicit TTY decision — used in tests to exercise both paths.
-    pub(crate) fn new_with_tty(msg: &str, is_tty: bool) -> Self {
+    pub(super) fn new_with_tty(msg: &str, is_tty: bool) -> Self {
         let done = Arc::new(AtomicBool::new(false));
         let message = Arc::new(Mutex::new(msg.to_owned()));
 
@@ -92,6 +92,34 @@ impl Drop for Spinner {
     }
 }
 
+/// Runs `work` under a spinner, finishing or cancelling based on the result.
+///
+/// `work` receives a message-updater closure it can call to show progress.
+/// On success the spinner is finished with the message returned by `finish_msg`.
+/// On error the spinner is cancelled and the error is propagated.
+pub fn with_spinner<T, E>(
+    start: &str,
+    finish_msg: impl FnOnce(&T) -> String,
+    work: impl FnOnce(&dyn Fn(&str)) -> Result<T, E>,
+) -> Result<T, E> {
+    let spinner = Spinner::new(start);
+    let result = {
+        let update = |msg: &str| spinner.set_message(msg);
+        work(&update)
+    };
+    match result {
+        Ok(val) => {
+            let msg = finish_msg(&val);
+            spinner.finish(&msg);
+            Ok(val)
+        }
+        Err(e) => {
+            spinner.cancel();
+            Err(e)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -142,5 +170,44 @@ mod tests {
             "TTY spinner must spawn a background thread"
         );
         spinner.cancel();
+    }
+
+    // T-012: with_spinner success path returns Ok(T)
+    #[test]
+    fn with_spinner_success_returns_ok() {
+        let result = with_spinner(
+            "start",
+            |v: &u32| format!("done {v}"),
+            |_| Ok::<u32, &str>(42),
+        );
+        assert_eq!(result, Ok(42));
+    }
+
+    // T-013: with_spinner error path cancels spinner and returns Err
+    #[test]
+    fn with_spinner_error_propagates() {
+        let result = with_spinner(
+            "start",
+            |_: &()| "done".to_owned(),
+            |_| Err::<(), &str>("boom"),
+        );
+        assert_eq!(result, Err("boom"));
+    }
+
+    // T-014: with_spinner progress updater is callable inside work
+    #[test]
+    fn with_spinner_progress_updater_works() {
+        let messages: std::cell::RefCell<Vec<String>> = std::cell::RefCell::new(Vec::new());
+        let _ = with_spinner(
+            "start",
+            |_: &()| "done".to_owned(),
+            |update| {
+                update("step 1");
+                update("step 2");
+                Ok::<(), &str>(())
+            },
+        );
+        // No panic = updater callable without error. Message side-effects go to stderr.
+        drop(messages);
     }
 }
