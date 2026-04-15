@@ -303,7 +303,10 @@ mod tests {
             },
         );
         assert_eq!(result.err(), Some(DegradedReason::ProbeFailed));
-        assert!(delete_called.get(), "delete_fn should be called on new_fn ModelCorrupt");
+        assert!(
+            delete_called.get(),
+            "delete_fn should be called on new_fn ModelCorrupt"
+        );
         assert!(
             !on_delete_error_called.get(),
             "on_delete_error must not be called when delete succeeds"

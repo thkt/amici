@@ -1,6 +1,8 @@
 pub mod embedder;
 pub mod reranker;
 
+use std::fmt;
+
 /// Reason a model could not be loaded.
 ///
 /// `Disabled` is reserved for caller-level opt-out (e.g. an environment variable);
@@ -19,8 +21,8 @@ pub enum DegradedReason {
     ProbeFailed,
 }
 
-impl std::fmt::Display for DegradedReason {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for DegradedReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             DegradedReason::Disabled => write!(f, "disabled"),
             DegradedReason::NotInstalled => write!(f, "not installed"),
@@ -83,8 +85,8 @@ impl<T> ModelLoad<T> {
     }
 }
 
-impl<T> std::fmt::Debug for ModelLoad<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<T> fmt::Debug for ModelLoad<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Ready(_) => write!(f, "Ready(...)"),
             Self::Absent => write!(f, "Absent"),

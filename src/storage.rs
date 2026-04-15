@@ -44,7 +44,7 @@ pub fn append_eq_filter(
         sql.push_str(" AND ");
         sql.push_str(column);
         sql.push_str(" = ?");
-        params.push(Box::new(v.to_string()));
+        params.push(Box::new(v.to_owned()));
     }
 }
 

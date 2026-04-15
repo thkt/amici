@@ -1,4 +1,4 @@
-use std::io::{IsTerminal, Write};
+use std::io::{IsTerminal, Write, stderr};
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
@@ -22,19 +22,19 @@ impl Spinner {
     /// spinner frame on each tick. When not a terminal: prints `msg` to stderr immediately
     /// and skips the animation.
     pub fn new(msg: &str) -> Self {
-        Self::new_with_tty(msg, std::io::stderr().is_terminal())
+        Self::new_with_tty(msg, stderr().is_terminal())
     }
 
     /// Creates a spinner with an explicit TTY decision — used in tests to exercise both paths.
     pub(crate) fn new_with_tty(msg: &str, is_tty: bool) -> Self {
         let done = Arc::new(AtomicBool::new(false));
-        let message = Arc::new(Mutex::new(msg.to_string()));
+        let message = Arc::new(Mutex::new(msg.to_owned()));
 
         let thread = if is_tty {
             let done = Arc::clone(&done);
             let message = Arc::clone(&message);
             Some(thread::spawn(move || {
-                let mut err = std::io::stderr();
+                let mut err = stderr();
                 let mut i = 0;
                 loop {
                     if done.load(Ordering::Relaxed) {
@@ -62,7 +62,7 @@ impl Spinner {
     /// Updates the message shown next to the spinner frame.
     pub fn set_message(&self, msg: &str) {
         if let Ok(mut m) = self.message.lock() {
-            *m = msg.to_string();
+            *m = msg.to_owned();
         }
     }
 
@@ -87,7 +87,7 @@ impl Drop for Spinner {
         if let Some(t) = self.thread.take() {
             let _ = t.join();
             eprint!("\r\x1b[2K");
-            let _ = std::io::stderr().flush();
+            let _ = stderr().flush();
         }
     }
 }
@@ -126,7 +126,10 @@ mod tests {
     #[test]
     fn new_with_tty_false_has_no_thread() {
         let spinner = Spinner::new_with_tty("loading...", false);
-        assert!(spinner.thread.is_none(), "non-TTY spinner must not spawn a thread");
+        assert!(
+            spinner.thread.is_none(),
+            "non-TTY spinner must not spawn a thread"
+        );
         spinner.cancel();
     }
 
@@ -134,7 +137,10 @@ mod tests {
     #[test]
     fn new_with_tty_true_has_thread() {
         let spinner = Spinner::new_with_tty("loading...", true);
-        assert!(spinner.thread.is_some(), "TTY spinner must spawn a background thread");
+        assert!(
+            spinner.thread.is_some(),
+            "TTY spinner must spawn a background thread"
+        );
         spinner.cancel();
     }
 }
