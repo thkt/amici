@@ -1,6 +1,10 @@
 [advisories]
 version = 2
-ignore = []
+ignore = [
+    # paste: unmaintained (RUSTSEC-2024-0436)
+    # rurico の transitive dep (mlx-rs, tokenizers 経由)。safe upgrade なし。
+    { id = "RUSTSEC-2024-0436", reason = "transitive dep via rurico; no safe upgrade available" },
+]
 
 [licenses]
 version = 2
