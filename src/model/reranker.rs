@@ -2,7 +2,7 @@ use std::io;
 
 use rurico::reranker::{Artifacts, ProbeStatus, Rerank, Reranker, RerankerInitError};
 
-use crate::model::DegradedReason;
+use super::DegradedReason;
 
 /// Try to load the reranking model.
 ///
@@ -87,36 +87,15 @@ where
 mod tests {
     use std::cell::Cell;
 
-    use rurico::reranker::{RankedResult, RerankerError};
+    use rurico::reranker::{Artifacts, MockReranker};
 
     use super::*;
-
-    struct StubReranker;
-
-    impl Rerank for StubReranker {
-        fn score(&self, _: &str, _: &str) -> Result<f32, RerankerError> {
-            Ok(0.0)
-        }
-        fn score_batch(&self, pairs: &[(&str, &str)]) -> Result<Vec<f32>, RerankerError> {
-            Ok(vec![0.0; pairs.len()])
-        }
-        fn rerank(&self, _: &str, documents: &[&str]) -> Result<Vec<RankedResult>, RerankerError> {
-            Ok(documents
-                .iter()
-                .enumerate()
-                .map(|(i, _)| RankedResult {
-                    index: i,
-                    score: 0.0,
-                })
-                .collect())
-        }
-    }
 
     fn cache_present() -> impl FnOnce() -> Result<Option<()>, &'static str> {
         || Ok(Some(()))
     }
 
-    // T-006: cache_check=Ok(None) → Err(NotInstalled)
+    // T-040: cache_none_returns_not_installed
     #[test]
     fn cache_none_returns_not_installed() {
         let result = try_load_reranker_with(
@@ -127,18 +106,18 @@ mod tests {
         assert_eq!(result.err(), Some(DegradedReason::NotInstalled));
     }
 
-    // T-007: cache_check=Err → Err(ProbeFailed), on_err NOT called
+    // T-041: cache_err_returns_probe_failed
     #[test]
     fn cache_err_returns_probe_failed() {
         let result = try_load_reranker_with(
-            || Err::<Option<rurico::reranker::Artifacts>, _>("cache broken"),
+            || Err::<Option<Artifacts>, _>("cache broken"),
             |_| unreachable!("on_delete_error must not be called on cache error"),
             |_| unreachable!("on_err must not be called on cache error"),
         );
         assert_eq!(result.err(), Some(DegradedReason::ProbeFailed));
     }
 
-    // T-008: probe=Available, new=Ok → Ok
+    // T-042: probe_available_new_ok_returns_ready
     #[test]
     fn probe_available_new_ok_returns_ready() {
         let result = try_load_reranker_with_fns(
@@ -146,16 +125,16 @@ mod tests {
             |_| unreachable!("on_delete_error must not be called on success"),
             |_| unreachable!("on_err must not be called on success"),
             |_| Ok(ProbeStatus::Available),
-            |_| Ok(StubReranker),
+            |_| Ok(MockReranker::default()),
             |_| unreachable!("delete must not be called on success"),
         );
         assert!(result.is_ok());
     }
 
-    // T-009: probe=BackendUnavailable → Err(BackendUnavailable)
+    // T-043: probe_backend_unavailable_returns_backend_unavailable
     #[test]
     fn probe_backend_unavailable_returns_backend_unavailable() {
-        let result = try_load_reranker_with_fns::<_, _, StubReranker>(
+        let result = try_load_reranker_with_fns::<_, _, MockReranker>(
             cache_present(),
             |_| unreachable!("on_delete_error must not be called on BackendUnavailable"),
             |_| unreachable!("on_err must not be called on BackendUnavailable"),
@@ -166,11 +145,11 @@ mod tests {
         assert_eq!(result.err(), Some(DegradedReason::BackendUnavailable));
     }
 
-    // T-010: probe=Err(Backend) → on_err called with error detail, Err(ProbeFailed)
+    // T-044: probe_err_invokes_on_err
     #[test]
     fn probe_err_invokes_on_err() {
         let captured: Cell<Option<String>> = Cell::new(None);
-        let result = try_load_reranker_with_fns::<_, _, StubReranker>(
+        let result = try_load_reranker_with_fns::<_, _, MockReranker>(
             cache_present(),
             |_| unreachable!("on_delete_error must not be called on non-corrupt probe error"),
             |e| captured.set(Some(e.to_string())),
@@ -186,11 +165,11 @@ mod tests {
         );
     }
 
-    // T-011: new=Err → on_err called with error detail, Err(ProbeFailed)
+    // T-045: new_err_invokes_on_err
     #[test]
     fn new_err_invokes_on_err() {
         let captured: Cell<Option<String>> = Cell::new(None);
-        let result = try_load_reranker_with_fns::<_, _, StubReranker>(
+        let result = try_load_reranker_with_fns::<_, _, MockReranker>(
             cache_present(),
             |_| unreachable!("on_delete_error must not be called when probe succeeds"),
             |e| captured.set(Some(e.to_string())),
@@ -206,13 +185,13 @@ mod tests {
         );
     }
 
-    // T-012: probe=ModelCorrupt, delete=Ok → on_delete_error NOT called, on_err NOT called, Err(ProbeFailed)
+    // T-046: corrupt_delete_ok_skips_on_delete_error
     #[test]
     fn corrupt_delete_ok_skips_on_delete_error() {
         let on_delete_error_called = Cell::new(false);
         let on_err_called = Cell::new(false);
         let delete_called = Cell::new(false);
-        let result = try_load_reranker_with_fns::<_, _, StubReranker>(
+        let result = try_load_reranker_with_fns::<_, _, MockReranker>(
             cache_present(),
             |_| on_delete_error_called.set(true),
             |_| on_err_called.set(true),
@@ -239,12 +218,12 @@ mod tests {
         );
     }
 
-    // T-013: probe=ModelCorrupt, delete=Err(io::Error) → on_delete_error called, on_err NOT called, Err(ProbeFailed)
+    // T-047: corrupt_delete_err_invokes_on_delete_error
     #[test]
     fn corrupt_delete_err_invokes_on_delete_error() {
         let captured: Cell<Option<String>> = Cell::new(None);
         let on_err_called = Cell::new(false);
-        let result = try_load_reranker_with_fns::<_, _, StubReranker>(
+        let result = try_load_reranker_with_fns::<_, _, MockReranker>(
             cache_present(),
             |e| captured.set(Some(e.to_string())),
             |_| on_err_called.set(true),
@@ -268,7 +247,7 @@ mod tests {
         );
     }
 
-    // T-014: public wrapper delegates correctly — cache empty → NotInstalled (wiring test)
+    // T-048: public_wrapper_absent_when_cache_empty
     #[test]
     fn public_wrapper_absent_when_cache_empty() {
         let result = try_load_reranker_with(
@@ -279,15 +258,13 @@ mod tests {
         assert_eq!(result.err(), Some(DegradedReason::NotInstalled));
     }
 
-    // T-015: probe=Available, new_fn=ModelCorrupt → delete_fn called, on_err NOT called, Err(ProbeFailed)
-    // Note: Reranker::new currently documents only RerankerInitError::Backend, but the type
-    // allows ModelCorrupt; this test defends against future changes in the backend.
+    // T-049: new_fn_corrupt_deletes_artifacts
     #[test]
     fn new_fn_corrupt_deletes_artifacts() {
         let on_delete_error_called = Cell::new(false);
         let on_err_called = Cell::new(false);
         let delete_called = Cell::new(false);
-        let result = try_load_reranker_with_fns::<_, _, StubReranker>(
+        let result = try_load_reranker_with_fns::<_, _, MockReranker>(
             cache_present(),
             |_| on_delete_error_called.set(true),
             |_| on_err_called.set(true),

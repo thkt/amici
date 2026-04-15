@@ -52,51 +52,51 @@ pub fn append_eq_filter(
 mod tests {
     use super::*;
 
-    // T-012: in_placeholders(3) → "?1, ?2, ?3"
+    // T-012: in_placeholders_numbered
     #[test]
     fn in_placeholders_numbered() {
         assert_eq!(in_placeholders(3), "?1, ?2, ?3");
         assert_eq!(in_placeholders(0), "");
     }
 
-    // T-013: anon_placeholders(3) → "?, ?, ?"
+    // T-013: anon_placeholders_anonymous
     #[test]
     fn anon_placeholders_anonymous() {
         assert_eq!(anon_placeholders(3), "?, ?, ?");
         assert_eq!(anon_placeholders(0), "");
     }
 
-    // T-014: as_sql_params — len matches input
+    // T-014: as_sql_params_len_matches
     #[test]
     fn as_sql_params_len_matches() {
         let values = ["a", "b"];
         assert_eq!(as_sql_params(&values).len(), 2);
     }
 
-    // T-015: append_eq_filter Some(v) → sql 追加・params 追加
+    // T-015: append_eq_filter_some_appends
     #[test]
     fn append_eq_filter_some_appends() {
-        let mut sql = "SELECT 1".to_string();
+        let mut sql = "SELECT 1".to_owned();
         let mut params: Vec<Box<dyn ToSql>> = Vec::new();
         append_eq_filter(&mut sql, &mut params, "p.category", Some("x"));
         assert_eq!(sql, "SELECT 1 AND p.category = ?");
         assert_eq!(params.len(), 1);
     }
 
-    // T-016: append_eq_filter None → 変化なし
+    // T-016: append_eq_filter_none_noop
     #[test]
     fn append_eq_filter_none_noop() {
-        let mut sql = "SELECT 1".to_string();
+        let mut sql = "SELECT 1".to_owned();
         let mut params: Vec<Box<dyn ToSql>> = Vec::new();
         append_eq_filter(&mut sql, &mut params, "p.category", None);
         assert_eq!(sql, "SELECT 1");
         assert!(params.is_empty());
     }
 
-    // T-017: append_eq_filter を2回連続呼び出し → SQL と params.len が両方正しく積まれる
+    // T-017: append_eq_filter_two_consecutive_filters
     #[test]
     fn append_eq_filter_two_consecutive_filters() {
-        let mut sql = "SELECT 1".to_string();
+        let mut sql = "SELECT 1".to_owned();
         let mut params: Vec<Box<dyn ToSql>> = Vec::new();
         append_eq_filter(&mut sql, &mut params, "p.category", Some("book"));
         append_eq_filter(&mut sql, &mut params, "p.lang", Some("ja"));

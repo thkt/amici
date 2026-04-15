@@ -124,7 +124,7 @@ pub fn with_spinner<T, E>(
 mod tests {
     use super::*;
 
-    // T-007: cancel() が Drop をトリガーし done フラグが true になる
+    // T-030: cancel_signals_done
     #[test]
     fn cancel_signals_done() {
         let spinner = Spinner::new("loading...");
@@ -133,7 +133,7 @@ mod tests {
         assert!(done.load(Ordering::Relaxed));
     }
 
-    // T-008: set_message() でメッセージが更新される
+    // T-031: set_message_updates_message
     #[test]
     fn set_message_updates_message() {
         let spinner = Spinner::new("initial");
@@ -143,14 +143,14 @@ mod tests {
         spinner.cancel();
     }
 
-    // T-009: 非TTY 環境で finish() がパニックしない
+    // T-032: finish_non_tty_does_not_panic
     #[test]
     fn finish_non_tty_does_not_panic() {
         let spinner = Spinner::new("loading...");
         spinner.finish("done");
     }
 
-    // T-010: new_with_tty(false) → thread is None (non-TTY path)
+    // T-033: new_with_tty_false_has_no_thread
     #[test]
     fn new_with_tty_false_has_no_thread() {
         let spinner = Spinner::new_with_tty("loading...", false);
@@ -161,7 +161,7 @@ mod tests {
         spinner.cancel();
     }
 
-    // T-011: new_with_tty(true) → thread is Some (TTY path)
+    // T-034: new_with_tty_true_has_thread
     #[test]
     fn new_with_tty_true_has_thread() {
         let spinner = Spinner::new_with_tty("loading...", true);
@@ -172,7 +172,7 @@ mod tests {
         spinner.cancel();
     }
 
-    // T-012: with_spinner success path returns Ok(T)
+    // T-035: with_spinner_success_returns_ok
     #[test]
     fn with_spinner_success_returns_ok() {
         let result = with_spinner(
@@ -183,7 +183,7 @@ mod tests {
         assert_eq!(result, Ok(42));
     }
 
-    // T-013: with_spinner error path cancels spinner and returns Err
+    // T-036: with_spinner_error_propagates
     #[test]
     fn with_spinner_error_propagates() {
         let result = with_spinner(
@@ -194,10 +194,9 @@ mod tests {
         assert_eq!(result, Err("boom"));
     }
 
-    // T-014: with_spinner progress updater is callable inside work
+    // T-037: with_spinner_progress_updater_works
     #[test]
     fn with_spinner_progress_updater_works() {
-        let messages: std::cell::RefCell<Vec<String>> = std::cell::RefCell::new(Vec::new());
         let _ = with_spinner(
             "start",
             |_: &()| "done".to_owned(),
@@ -208,6 +207,5 @@ mod tests {
             },
         );
         // No panic = updater callable without error. Message side-effects go to stderr.
-        drop(messages);
     }
 }
