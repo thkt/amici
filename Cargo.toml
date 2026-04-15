@@ -7,7 +7,7 @@ license = "MIT"
 repository = "https://github.com/thkt/amici"
 
 [dependencies]
-rurico   = { git = "https://github.com/thkt/rurico", rev = "216f25f" }
+rurico   = { git = "https://github.com/thkt/rurico", rev = "350effd" }
 rusqlite = { version = "0.39", features = ["bundled"] }
 
 [lints.rust]
