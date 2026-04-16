@@ -92,6 +92,29 @@ impl Drop for Spinner {
     }
 }
 
+/// Runs model load then embedding under two spinners, short-circuiting when `pending == 0`.
+///
+/// - `Ok(None)` — nothing to embed (pending was zero)
+/// - `Ok(Some(result))` — embedding completed successfully
+/// - `Err` — model load or embedding failed
+pub fn embed_with_spinners<M, R, E>(
+    pending: u32,
+    load_model: impl FnOnce(&dyn Fn(&str)) -> Result<M, E>,
+    finish_msg: impl FnOnce(&R) -> String,
+    run_embed: impl FnOnce(M, &dyn Fn(&str)) -> Result<R, E>,
+) -> Result<Option<R>, E> {
+    if pending == 0 {
+        return Ok(None);
+    }
+    let model = with_spinner("Loading model...", |_| "Model ready".to_owned(), load_model)?;
+    let result = with_spinner(
+        &format!("Embedding... 0/{pending} chunks"),
+        finish_msg,
+        |update| run_embed(model, update),
+    )?;
+    Ok(Some(result))
+}
+
 /// Runs `work` under a spinner, finishing or cancelling based on the result.
 ///
 /// `work` receives a message-updater closure it can call to show progress.
@@ -130,7 +153,10 @@ mod tests {
         let spinner = Spinner::new("loading...");
         let done = Arc::clone(&spinner.done);
         spinner.cancel();
-        assert!(done.load(Ordering::Relaxed));
+        assert!(
+            done.load(Ordering::Relaxed),
+            "done flag should be true after cancel"
+        );
     }
 
     // T-031: set_message_updates_message
@@ -207,5 +233,29 @@ mod tests {
             },
         );
         // No panic = updater callable without error. Message side-effects go to stderr.
+    }
+
+    // T-038: embed_with_spinners_pending_zero_returns_none
+    #[test]
+    fn embed_with_spinners_pending_zero_returns_none() {
+        let result = embed_with_spinners(
+            0,
+            |_| Ok::<u32, &str>(42),
+            |v: &u32| format!("done {v}"),
+            |_, _| unreachable!("run_embed must not be called when pending is zero"),
+        );
+        assert_eq!(result, Ok(None));
+    }
+
+    // T-039: embed_with_spinners_nonzero_pending_returns_some
+    #[test]
+    fn embed_with_spinners_nonzero_pending_returns_some() {
+        let result = embed_with_spinners(
+            5,
+            |_| Ok::<u32, &str>(99),
+            |v: &u32| format!("done {v}"),
+            |model, _| Ok::<u32, &str>(model + 1),
+        );
+        assert_eq!(result, Ok(Some(100)));
     }
 }

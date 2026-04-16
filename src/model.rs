@@ -242,9 +242,18 @@ mod tests {
     // T-020: debug_output_contains_variant_name
     #[test]
     fn debug_output_contains_variant_name() {
-        assert!(format!("{:?}", ModelLoad::Ready(1)).contains("Ready"));
-        assert!(format!("{:?}", ModelLoad::<i32>::Absent).contains("Absent"));
-        assert!(format!("{:?}", ModelLoad::<i32>::Failed("msg".into())).contains("Failed"));
+        let ready = format!("{:?}", ModelLoad::Ready(1));
+        assert!(ready.contains("Ready"), "expected 'Ready', got: {ready}");
+        let absent = format!("{:?}", ModelLoad::<i32>::Absent);
+        assert!(
+            absent.contains("Absent"),
+            "expected 'Absent', got: {absent}"
+        );
+        let failed = format!("{:?}", ModelLoad::<i32>::Failed("msg".into()));
+        assert!(
+            failed.contains("Failed"),
+            "expected 'Failed', got: {failed}"
+        );
     }
 
     // T-021: emit_load_hint_does_not_panic
@@ -288,10 +297,10 @@ mod tests {
             |_| unreachable!("delete must not be called on BackendUnavailable"),
             || {},
         );
-        assert!(matches!(
-            result,
-            Err(ModelDownloadError::BackendUnavailable)
-        ));
+        assert!(
+            matches!(result, Err(ModelDownloadError::BackendUnavailable)),
+            "expected BackendUnavailable, got {result:?}"
+        );
     }
 
     // T-024: probe_err_captured_in_probe_failed
