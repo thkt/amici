@@ -19,8 +19,8 @@ impl Spinner {
     /// Creates a spinner, auto-detecting whether stderr is a TTY.
     ///
     /// When stderr is a terminal: starts a background thread that renders an animated
-    /// spinner frame on each tick. When not a terminal: prints `msg` to stderr immediately
-    /// and skips the animation.
+    /// spinner frame on each tick. When not a terminal: creates a no-op spinner that
+    /// prints nothing until [`finish`](Self::finish) is called.
     pub fn new(msg: &str) -> Self {
         Self::new_with_tty(msg, stderr().is_terminal())
     }
@@ -48,7 +48,6 @@ impl Spinner {
                 }
             }))
         } else {
-            eprintln!("{msg}");
             None
         };
 
@@ -66,19 +65,26 @@ impl Spinner {
         }
     }
 
-    /// Clears the spinner line, then prints a success message.
+    /// Clears the spinner line, then prints a success marker line via [`done`].
+    ///
+    /// The marker is shown on both TTY and non-TTY streams so downstream log parsers
+    /// see a consistent `✓ {msg}` format regardless of terminal detection.
     pub fn finish(self, msg: &str) {
-        let is_tty = self.thread.is_some();
         drop(self);
-        if is_tty {
-            eprintln!("\x1b[32m✓\x1b[0m {msg}");
-        } else {
-            eprintln!("{msg}");
-        }
+        done(msg);
     }
 
     /// Stops the spinner silently by consuming it, triggering `Drop`.
     pub fn cancel(self) {}
+}
+
+/// Prints a `✓ {msg}` success line to stderr without running a spinner.
+///
+/// Use for standalone completion markers — for example, "nothing to do" branches
+/// that skip the spinner entirely. Paired with [`Spinner::finish`] so both paths
+/// produce identical output.
+pub fn done(msg: &str) {
+    eprintln!("\x1b[32m✓\x1b[0m {msg}");
 }
 
 impl Drop for Spinner {
@@ -257,5 +263,19 @@ mod tests {
             |model, _| Ok::<u32, &str>(model + 1),
         );
         assert_eq!(result, Ok(Some(100)));
+    }
+
+    // T-040: done_does_not_panic
+    #[test]
+    fn done_does_not_panic() {
+        done("ready");
+    }
+
+    // T-041: finish_non_tty_does_not_panic_after_set_message
+    #[test]
+    fn finish_non_tty_does_not_panic_after_set_message() {
+        let spinner = Spinner::new_with_tty("start", false);
+        spinner.set_message("working");
+        spinner.finish("done");
     }
 }
