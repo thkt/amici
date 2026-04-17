@@ -7,12 +7,12 @@ license = "MIT"
 repository = "https://github.com/thkt/amici"
 
 [dependencies]
-rurico   = { git = "https://github.com/thkt/rurico", rev = "350effd" }
+rurico   = { git = "https://github.com/thkt/rurico", rev = "3cc9cb0" }
 rusqlite = { version = "0.39", features = ["bundled"] }
 tracing  = "0.1"
 
 [dev-dependencies]
-rurico = { git = "https://github.com/thkt/rurico", rev = "350effd", features = ["test-support"] }
+rurico = { git = "https://github.com/thkt/rurico", rev = "3cc9cb0", features = ["test-support"] }
 
 [lints.rust]
 unsafe_code = "forbid"
