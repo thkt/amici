@@ -8,9 +8,10 @@ license = "MIT"
 repository = "https://github.com/thkt/amici"
 
 [dependencies]
-rurico   = { git = "https://github.com/thkt/rurico", rev = "bc2ad90" }
-rusqlite = { version = "0.39", features = ["bundled"] }
-tracing  = "0.1"
+rurico             = { git = "https://github.com/thkt/rurico", rev = "bc2ad90" }
+rusqlite           = { version = "0.39", features = ["bundled"] }
+tracing            = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
 rurico = { git = "https://github.com/thkt/rurico", rev = "bc2ad90", features = ["test-support"] }
