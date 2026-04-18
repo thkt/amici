@@ -70,8 +70,32 @@ impl Spinner {
     /// The marker is shown on both TTY and non-TTY streams so downstream log parsers
     /// see a consistent `✓ {msg}` format regardless of terminal detection.
     pub fn finish(self, msg: &str) {
+        self.finish_with_detail(msg, None);
+    }
+
+    /// Finishes with the primary success line, then an optional indented detail line.
+    ///
+    /// `detail`, when `Some`, is printed on the following line prefixed with two
+    /// spaces so it reads as a continuation of the success marker. Use for
+    /// non-fatal side notes such as "skipped N items" or partial-failure summaries.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use amici::cli::Spinner;
+    /// let sp = Spinner::new("Indexing...");
+    /// sp.finish_with_detail(
+    ///     "Indexed 100 sessions",
+    ///     Some("Failed to parse 3 files — permission denied"),
+    /// );
+    /// ```
+    pub fn finish_with_detail(self, main: &str, detail: Option<&str>) {
+        // Drop first so the frame-thread clears the spinner line before `done` writes `✓`.
         drop(self);
-        done(msg);
+        done(main);
+        if let Some(d) = detail {
+            eprintln!("  {d}");
+        }
     }
 
     /// Stops the spinner silently by consuming it, triggering `Drop`.
@@ -277,5 +301,19 @@ mod tests {
         let spinner = Spinner::new_with_tty("start", false);
         spinner.set_message("working");
         spinner.finish("done");
+    }
+
+    // T-054: finish_with_detail_none_matches_finish_behavior
+    #[test]
+    fn finish_with_detail_none_matches_finish_behavior() {
+        let spinner = Spinner::new_with_tty("start", false);
+        spinner.finish_with_detail("done", None);
+    }
+
+    // T-055: finish_with_detail_some_does_not_panic
+    #[test]
+    fn finish_with_detail_some_does_not_panic() {
+        let spinner = Spinner::new_with_tty("start", false);
+        spinner.finish_with_detail("done", Some("skipped 3 items"));
     }
 }
