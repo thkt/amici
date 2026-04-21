@@ -1,37 +1,45 @@
 //! FTS5 trigram tokenizer adapters for `rurico::storage::MatchFtsQuery` output.
 
-/// Adapt a [`MatchFtsQuery`](rurico::storage::MatchFtsQuery) string for an FTS5
-/// `trigram` tokenizer.
+use rurico::storage::MatchFtsQuery;
+
+/// Adapt a [`MatchFtsQuery`] for an FTS5 `trigram` tokenizer.
 ///
 /// The trigram tokenizer rejects `("a" OR "b") "c"` (a parenthesized OR-group
 /// followed by implicit AND). This function distributes OR-groups into flat
 /// alternatives — `(A OR B) C` → `A C OR B C` — and drops sub-trigram terms
 /// (<3 chars) inside OR-groups because the trigram tokenizer cannot index them.
 ///
-/// Callers should pass `rurico::storage::MatchFtsQuery::as_str()`; other
-/// inputs are accepted for testability but bare tokens outside `(...)` or
-/// `"..."` are silently dropped. Control characters are stripped.
-///
-/// Returns an empty string when every OR-group alternative was sub-trigram and
-/// no fixed terms remain — callers should treat this as "no results".
-pub fn clean_for_trigram(match_query: &str) -> String {
+/// Control characters are stripped. Returns `None` when the input contains no
+/// indexable terms (e.g. every OR-group alternative was sub-trigram); callers
+/// should treat this as "no results" rather than passing an empty string to
+/// FTS5 `MATCH`.
+pub fn clean_for_trigram(query: &MatchFtsQuery) -> Option<String> {
+    clean_impl(query.as_str())
+}
+
+fn clean_impl(match_query: &str) -> Option<String> {
     let cleaned: String = match_query.chars().filter(|c| !c.is_control()).collect();
     let (fixed, or_groups) = parse_fts_segments(&cleaned);
 
     if or_groups.is_empty() {
-        return fixed.join(" ");
+        if fixed.is_empty() {
+            return None;
+        }
+        return Some(fixed.join(" "));
     }
 
     let combos = cross_product(&or_groups);
-    combos
-        .iter()
-        .map(|combo| {
-            let mut parts = combo.clone();
-            parts.extend(fixed.iter().cloned());
-            parts.join(" ")
-        })
-        .collect::<Vec<_>>()
-        .join(" OR ")
+    Some(
+        combos
+            .iter()
+            .map(|combo| {
+                let mut parts = combo.clone();
+                parts.extend(fixed.iter().cloned());
+                parts.join(" ")
+            })
+            .collect::<Vec<_>>()
+            .join(" OR "),
+    )
 }
 
 fn parse_fts_segments(cleaned: &str) -> (Vec<String>, Vec<Vec<String>>) {
@@ -64,7 +72,12 @@ fn parse_fts_segments(cleaned: &str) -> (Vec<String>, Vec<Vec<String>>) {
                     break;
                 }
             }
-            fixed.push(term);
+            // Trigram tokenizer cannot index <3 char terms; apply the same
+            // filter used inside OR-groups so the Option<String> contract
+            // stays honest across all input shapes.
+            if term.trim_matches('"').chars().count() >= 3 {
+                fixed.push(term);
+            }
         }
     }
 
@@ -97,45 +110,59 @@ mod tests {
     fn distributes_or_groups() {
         // Control chars removed + sub-trigram dropped + distributed
         assert_eq!(
-            clean_for_trigram("(\"認証の\" OR \"認証\n\" OR \"認証フ\") \"フロー\""),
-            "\"認証の\" \"フロー\" OR \"認証フ\" \"フロー\""
+            clean_impl("(\"認証の\" OR \"認証\n\" OR \"認証フ\") \"フロー\"").as_deref(),
+            Some("\"認証の\" \"フロー\" OR \"認証フ\" \"フロー\"")
         );
 
         // Multi-element group + fixed term → distributed
         assert_eq!(
-            clean_for_trigram("(\"abc\" OR \"def\") \"ghi\""),
-            "\"abc\" \"ghi\" OR \"def\" \"ghi\""
+            clean_impl("(\"abc\" OR \"def\") \"ghi\"").as_deref(),
+            Some("\"abc\" \"ghi\" OR \"def\" \"ghi\"")
         );
 
         // No parens → unchanged
-        assert_eq!(clean_for_trigram("\"hello\""), "\"hello\"");
+        assert_eq!(clean_impl("\"hello\"").as_deref(), Some("\"hello\""));
 
         // Single group, no fixed terms → just OR
         assert_eq!(
-            clean_for_trigram("(\"abc\" OR \"def\")"),
-            "\"abc\" OR \"def\""
+            clean_impl("(\"abc\" OR \"def\")").as_deref(),
+            Some("\"abc\" OR \"def\"")
         );
 
         // Multiple OR groups → cross-product
         assert_eq!(
-            clean_for_trigram("(\"a01\" OR \"a02\") (\"b01\" OR \"b02\")"),
-            "\"a01\" \"b01\" OR \"a01\" \"b02\" OR \"a02\" \"b01\" OR \"a02\" \"b02\""
+            clean_impl("(\"a01\" OR \"a02\") (\"b01\" OR \"b02\")").as_deref(),
+            Some("\"a01\" \"b01\" OR \"a01\" \"b02\" OR \"a02\" \"b01\" OR \"a02\" \"b02\"")
         );
     }
 
     #[test]
-    fn empties_all_sub_trigram() {
+    fn returns_none_when_all_sub_trigram() {
         // All terms in the only OR-group are sub-trigram (<3 chars).
-        // parse_fts_segments filters them, leaving no fixed terms → empty output.
-        assert_eq!(clean_for_trigram("(\"ab\" OR \"cd\")"), "");
+        // parse_fts_segments filters them, leaving no fixed terms → None.
+        assert_eq!(clean_impl("(\"ab\" OR \"cd\")"), None);
+    }
+
+    #[test]
+    fn returns_none_for_empty_input() {
+        assert_eq!(clean_impl(""), None);
+    }
+
+    #[test]
+    fn returns_none_for_sub_trigram_fixed_terms() {
+        // All fixed quoted tokens are <3 chars — trigram tokenizer cannot index them.
+        assert_eq!(clean_impl("\"au\""), None);
+        assert_eq!(clean_impl("\"a\" \"b\""), None);
     }
 
     #[test]
     fn accepts_live_prepare_match_query_output() {
-        // Integration sanity: clean_for_trigram accepts rurico output as-is.
+        // Integration: rurico sanitizes, amici adapts and returns Some.
         let conn = Connection::open_in_memory().unwrap();
         let matched = prepare_match_query(&conn, "hello world", "nonexistent_vocab").unwrap();
-        let cleaned = clean_for_trigram(matched.as_str());
-        assert_eq!(cleaned, "\"hello\" \"world\"");
+        assert_eq!(
+            clean_for_trigram(&matched).as_deref(),
+            Some("\"hello\" \"world\"")
+        );
     }
 }
