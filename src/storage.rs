@@ -1,3 +1,5 @@
+pub mod fts;
+
 use rusqlite::types::ToSql;
 
 /// Returns numbered placeholders without parentheses: `"?1, ?2, ?3"` for len=3.
