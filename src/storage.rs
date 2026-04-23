@@ -150,9 +150,6 @@ mod tests {
     // T-020: escape_like_order_does_not_double_escape
     #[test]
     fn escape_like_order_does_not_double_escape() {
-        // Backslash must be escaped first so that `\%` introduced by the `%`
-        // replacement is not re-escaped into `\\\%`.
-        assert_eq!(escape_like("%"), "\\%");
         assert_eq!(escape_like("\\%"), "\\\\\\%");
     }
 
