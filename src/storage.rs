@@ -50,6 +50,31 @@ pub fn append_eq_filter(
     }
 }
 
+/// Escapes LIKE metacharacters (`%`, `_`, `\`) in `s` for use with `ESCAPE '\'`.
+///
+/// The backslash is replaced first so the subsequent `%`/`_` replacements do
+/// not double-escape already-escaped sequences.
+pub fn escape_like(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+}
+
+/// Returns `true` iff `prefix` matches the leading bytes of `value` under
+/// ASCII case-insensitive comparison, mirroring SQLite LIKE semantics.
+///
+/// An empty `prefix` always matches. When `prefix` is longer than `value`, the
+/// result is `false`.
+///
+/// Use this on the Rust side when post-filtering rows already narrowed by a
+/// `LIKE ? ESCAPE '\'` clause, so that SQL and Rust agree on case semantics.
+pub fn like_prefix_match(value: &str, prefix: &str) -> bool {
+    value
+        .as_bytes()
+        .get(..prefix.len())
+        .is_some_and(|p| p.eq_ignore_ascii_case(prefix.as_bytes()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -104,5 +129,59 @@ mod tests {
         append_eq_filter(&mut sql, &mut params, "p.lang", Some("ja"));
         assert_eq!(sql, "SELECT 1 AND p.category = ? AND p.lang = ?");
         assert_eq!(params.len(), 2);
+    }
+
+    // T-018: escape_like_escapes_metachars
+    #[test]
+    fn escape_like_escapes_metachars() {
+        assert_eq!(escape_like("100%"), "100\\%");
+        assert_eq!(escape_like("foo_bar"), "foo\\_bar");
+        assert_eq!(escape_like("path\\to"), "path\\\\to");
+    }
+
+    // T-019: escape_like_preserves_regular_chars
+    #[test]
+    fn escape_like_preserves_regular_chars() {
+        assert_eq!(escape_like("hello"), "hello");
+        assert_eq!(escape_like(""), "");
+        assert_eq!(escape_like("日本語"), "日本語");
+    }
+
+    // T-020: escape_like_order_does_not_double_escape
+    #[test]
+    fn escape_like_order_does_not_double_escape() {
+        // Backslash must be escaped first so that `\%` introduced by the `%`
+        // replacement is not re-escaped into `\\\%`.
+        assert_eq!(escape_like("%"), "\\%");
+        assert_eq!(escape_like("\\%"), "\\\\\\%");
+    }
+
+    // T-021: like_prefix_match_case_insensitive
+    #[test]
+    fn like_prefix_match_case_insensitive() {
+        assert!(like_prefix_match("HelloWorld", "hello"));
+        assert!(like_prefix_match("helloworld", "HELLO"));
+        assert!(like_prefix_match("abc", "abc"));
+    }
+
+    // T-022: like_prefix_match_non_matching_returns_false
+    #[test]
+    fn like_prefix_match_non_matching_returns_false() {
+        assert!(!like_prefix_match("HelloWorld", "world"));
+        assert!(!like_prefix_match("abc", "xyz"));
+    }
+
+    // T-023: like_prefix_match_empty_prefix_always_matches
+    #[test]
+    fn like_prefix_match_empty_prefix_always_matches() {
+        assert!(like_prefix_match("anything", ""));
+        assert!(like_prefix_match("", ""));
+    }
+
+    // T-024: like_prefix_match_prefix_longer_than_value_is_false
+    #[test]
+    fn like_prefix_match_prefix_longer_than_value_is_false() {
+        assert!(!like_prefix_match("ab", "abc"));
+        assert!(!like_prefix_match("", "x"));
     }
 }
