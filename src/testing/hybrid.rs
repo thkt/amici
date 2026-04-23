@@ -4,14 +4,18 @@
 //! the results. A recurring bug class is "filter applied on FTS path but
 //! ignored on vec path", which lets filter-violating items leak through.
 //!
-//! - recall #35: `session_filter` ignored on vec path — fixed with a
-//!   post-filter `retain` at the merge layer.
-//! - yomu #103: `type_filter` ignored on vec path — fixed by appending the
-//!   filter to the vec SQL directly.
+//! The contract — "filter violations are never returned" — is an outcome
+//! property that does not depend on *where* or *how* the caller enforces
+//! the filter. So the helper in this module treats the whole search as a
+//! black box and asserts the outcome, which keeps the same test valid
+//! across future refactors and across new callers that pick a different
+//! strategy.
 //!
-//! Two different fix strategies, same contract. The helper in this module
-//! treats the search as a black box and asserts the outcome, so it works
-//! regardless of where the caller decided to enforce the filter.
+//! Known fix strategies across the toolchain:
+//!
+//! - SQL append — extend the vec SQL with the filter directly (yomu #103).
+//! - Post-filter retain — drop violating items after the merge (recall #35,
+//!   pre-unification).
 
 use std::fmt::Debug;
 
