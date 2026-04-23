@@ -7,6 +7,9 @@ description = "Shared model-loading, storage helpers, and CLI utilities for the 
 license = "MIT"
 repository = "https://github.com/thkt/amici"
 
+[features]
+test-support = []
+
 [dependencies]
 rurico             = { git = "https://github.com/thkt/rurico", rev = "7b739d1" }
 rusqlite           = { version = "0.39", features = ["bundled"] }
