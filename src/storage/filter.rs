@@ -65,12 +65,17 @@ pub fn append_eq_filter(
 
 /// Escapes LIKE metacharacters (`%`, `_`, `\`) in `s` for use with `ESCAPE '\'`.
 ///
-/// The backslash is replaced first so the subsequent `%`/`_` replacements do
-/// not double-escape already-escaped sequences.
+/// Prepends a single backslash before each metacharacter in one pass, so
+/// backslashes inserted by the escape never themselves become escape targets.
 pub fn escape_like(s: &str) -> String {
-    s.replace('\\', "\\\\")
-        .replace('%', "\\%")
-        .replace('_', "\\_")
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if matches!(c, '\\' | '%' | '_') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// Returns `true` iff `prefix` matches the leading bytes of `value` under
@@ -127,6 +132,36 @@ pub fn append_like_prefix_filter(
     }
 }
 
+/// Appends `" AND {column} {op} (?, ?, ...)"` and boxes each item as a param.
+///
+/// Private shared tail for the public `append_in_filter` / `append_include_ids`
+/// / `append_exclude_ids` helpers. Each public helper handles its own
+/// `None` / empty-set contract before delegating here, so this function
+/// assumes `iter` is non-empty. `op` is used verbatim ("IN" or "NOT IN").
+fn append_in_clause<I>(
+    sql: &mut String,
+    params: &mut Vec<Box<dyn ToSql>>,
+    column: &'static str,
+    op: &str,
+    iter: I,
+) where
+    I: IntoIterator,
+    I::IntoIter: ExactSizeIterator,
+    I::Item: ToSql + 'static,
+{
+    let iter = iter.into_iter();
+    sql.push_str(" AND ");
+    sql.push_str(column);
+    sql.push(' ');
+    sql.push_str(op);
+    sql.push_str(" (");
+    sql.push_str(&anon_placeholders(iter.len()));
+    sql.push(')');
+    for v in iter {
+        params.push(Box::new(v));
+    }
+}
+
 /// Appends `" AND {column} IN (?, ?, ...)"` when `values` is `Some(non-empty)`.
 ///
 /// - `None` → no-op (the filter is absent).
@@ -154,14 +189,7 @@ pub fn append_in_filter<T>(
         sql.push_str(" AND 1 = 0");
         return;
     }
-    sql.push_str(" AND ");
-    sql.push_str(column);
-    sql.push_str(" IN (");
-    sql.push_str(&anon_placeholders(values.len()));
-    sql.push(')');
-    for v in values {
-        params.push(Box::new(v.clone()));
-    }
+    append_in_clause(sql, params, column, "IN", values.iter().cloned());
 }
 
 /// Appends `" AND {column} NOT IN (?, ?, ...)"` when `exclude_ids` is non-empty.
@@ -181,14 +209,7 @@ pub fn append_exclude_ids(
     if exclude_ids.is_empty() {
         return;
     }
-    sql.push_str(" AND ");
-    sql.push_str(column);
-    sql.push_str(" NOT IN (");
-    sql.push_str(&anon_placeholders(exclude_ids.len()));
-    sql.push(')');
-    for id in exclude_ids {
-        params.push(Box::new(*id));
-    }
+    append_in_clause(sql, params, column, "NOT IN", exclude_ids.iter().copied());
 }
 
 /// Appends an `AND` clause restricting `column` to `include_ids`.
@@ -217,14 +238,7 @@ pub fn append_include_ids(
         sql.push_str(" AND 1 = 0");
         return;
     }
-    sql.push_str(" AND ");
-    sql.push_str(column);
-    sql.push_str(" IN (");
-    sql.push_str(&anon_placeholders(include_ids.len()));
-    sql.push(')');
-    for id in include_ids {
-        params.push(Box::new(*id));
-    }
+    append_in_clause(sql, params, column, "IN", include_ids.iter().copied());
 }
 
 /// Appends `" AND {column} >= ?"` binding `cutoff_ms` when `Some`.
