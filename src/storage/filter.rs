@@ -272,7 +272,9 @@ pub fn append_timestamp_cutoff_filter(
 ///
 /// Intended for SQLite `TEXT` columns storing dates like `"2026-04-23"`, where
 /// lexical ordering coincides with chronological ordering. Use
-/// [`append_timestamp_cutoff_filter`] for integer millisecond columns.
+/// [`append_timestamp_cutoff_filter`] for integer millisecond columns, or
+/// [`append_timestamp_day_cutoff_filter`] when the column may hold RFC 3339
+/// timestamps and the caller wants a day-inclusive `before`.
 ///
 /// See [`append_eq_filter`] for the `column` security contract.
 pub fn append_date_string_cutoff_filter(
@@ -286,6 +288,41 @@ pub fn append_date_string_cutoff_filter(
         sql.push_str(" AND ");
         sql.push_str(column);
         sql.push_str(if before { " <= ?" } else { " >= ?" });
+        params.push(Box::new(date.to_owned()));
+    }
+}
+
+/// Appends a day-inclusive cutoff comparison for RFC 3339 timestamp columns.
+///
+/// - `date_iso` `None` → no-op.
+/// - `before = true`  → `" AND {column} < date(?, '+1 day')"` (rows whose
+///   timestamp falls on or before the cutoff day, inclusive of T-suffix
+///   values that lexically follow the bare `YYYY-MM-DD` string).
+/// - `before = false` → `" AND {column} >= ?"` (rows whose timestamp is on or
+///   after the cutoff day; RFC 3339's `YYYY-MM-DDTHH:MM:SS±HH:MM` prefix
+///   already sorts correctly against the bare date).
+///
+/// Intended for SQLite `TEXT` columns storing RFC 3339 timestamps such as
+/// `"2025-03-01T12:00:00+00:00"`. Use [`append_date_string_cutoff_filter`]
+/// when the column is guaranteed to be date-only (plain `<= ?` suffices), or
+/// [`append_timestamp_cutoff_filter`] for integer millisecond columns.
+///
+/// See [`append_eq_filter`] for the `column` security contract.
+pub fn append_timestamp_day_cutoff_filter(
+    sql: &mut String,
+    params: &mut Vec<Box<dyn ToSql>>,
+    column: &'static str,
+    before: bool,
+    date_iso: Option<&str>,
+) {
+    if let Some(date) = date_iso {
+        sql.push_str(" AND ");
+        sql.push_str(column);
+        if before {
+            sql.push_str(" < date(?, '+1 day')");
+        } else {
+            sql.push_str(" >= ?");
+        }
         params.push(Box::new(date.to_owned()));
     }
 }
@@ -751,5 +788,141 @@ mod tests {
             .collect::<Result<_, _>>()
             .unwrap();
         assert_eq!(rows, vec!["2026-03-01".to_owned()]);
+    }
+
+    // T-050: append_timestamp_day_cutoff_filter_none_noop
+    #[test]
+    fn append_timestamp_day_cutoff_filter_none_noop() {
+        let mut sql = "SELECT 1".to_owned();
+        let mut params: Vec<Box<dyn ToSql>> = Vec::new();
+        append_timestamp_day_cutoff_filter(&mut sql, &mut params, "p.updated_at", true, None);
+        assert_eq!(sql, "SELECT 1");
+        assert!(params.is_empty());
+    }
+
+    // T-051: append_timestamp_day_cutoff_filter_before_true_appends_lt_plus_one_day
+    #[test]
+    fn append_timestamp_day_cutoff_filter_before_true_appends_lt_plus_one_day() {
+        let mut sql = "SELECT 1".to_owned();
+        let mut params: Vec<Box<dyn ToSql>> = Vec::new();
+        append_timestamp_day_cutoff_filter(
+            &mut sql,
+            &mut params,
+            "p.updated_at",
+            true,
+            Some("2025-03-01"),
+        );
+        assert_eq!(sql, "SELECT 1 AND p.updated_at < date(?, '+1 day')");
+        assert_eq!(params.len(), 1);
+    }
+
+    // T-052: append_timestamp_day_cutoff_filter_before_false_appends_ge
+    #[test]
+    fn append_timestamp_day_cutoff_filter_before_false_appends_ge() {
+        let mut sql = "SELECT 1".to_owned();
+        let mut params: Vec<Box<dyn ToSql>> = Vec::new();
+        append_timestamp_day_cutoff_filter(
+            &mut sql,
+            &mut params,
+            "p.updated_at",
+            false,
+            Some("2025-03-01"),
+        );
+        assert_eq!(sql, "SELECT 1 AND p.updated_at >= ?");
+        assert_eq!(params.len(), 1);
+    }
+
+    // T-053: append_timestamp_day_cutoff_filter_day_inclusive_on_rfc3339_via_sqlite
+    // Locks in that `date(?, '+1 day')` lifts the upper bound past T-suffix rows.
+    #[test]
+    fn append_timestamp_day_cutoff_filter_day_inclusive_on_rfc3339_via_sqlite() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute("CREATE TABLE t (updated_at TEXT)", [])
+            .unwrap();
+        conn.execute(
+            "INSERT INTO t VALUES \
+             ('2025-02-28T23:59:59+00:00'), \
+             ('2025-03-01'), \
+             ('2025-03-01T00:00:00+00:00'), \
+             ('2025-03-01T12:00:00+00:00'), \
+             ('2025-03-01T23:59:59+00:00'), \
+             ('2025-03-02T00:00:00+00:00')",
+            [],
+        )
+        .unwrap();
+
+        let mut sql = "SELECT updated_at FROM t WHERE 1=1".to_owned();
+        let mut params: Vec<Box<dyn ToSql>> = Vec::new();
+        append_timestamp_day_cutoff_filter(
+            &mut sql,
+            &mut params,
+            "updated_at",
+            true,
+            Some("2025-03-01"),
+        );
+        sql.push_str(" ORDER BY updated_at");
+
+        let mut stmt = conn.prepare(&sql).unwrap();
+        let rows: Vec<String> = stmt
+            .query_map(rusqlite::params_from_iter(params.iter()), |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                "2025-02-28T23:59:59+00:00".to_owned(),
+                "2025-03-01".to_owned(),
+                "2025-03-01T00:00:00+00:00".to_owned(),
+                "2025-03-01T12:00:00+00:00".to_owned(),
+                "2025-03-01T23:59:59+00:00".to_owned(),
+            ]
+        );
+    }
+
+    // T-054: append_timestamp_day_cutoff_filter_before_false_start_inclusive_on_rfc3339_via_sqlite
+    // Locks in that RFC 3339 prefix sort against a bare `YYYY-MM-DD` lower bound works.
+    #[test]
+    fn append_timestamp_day_cutoff_filter_before_false_start_inclusive_on_rfc3339_via_sqlite() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute("CREATE TABLE t (updated_at TEXT)", [])
+            .unwrap();
+        conn.execute(
+            "INSERT INTO t VALUES \
+             ('2025-02-28T23:59:59+00:00'), \
+             ('2025-03-01'), \
+             ('2025-03-01T00:00:00+00:00'), \
+             ('2025-03-01T12:00:00+00:00'), \
+             ('2025-03-02T00:00:00+00:00')",
+            [],
+        )
+        .unwrap();
+
+        let mut sql = "SELECT updated_at FROM t WHERE 1=1".to_owned();
+        let mut params: Vec<Box<dyn ToSql>> = Vec::new();
+        append_timestamp_day_cutoff_filter(
+            &mut sql,
+            &mut params,
+            "updated_at",
+            false,
+            Some("2025-03-01"),
+        );
+        sql.push_str(" ORDER BY updated_at");
+
+        let mut stmt = conn.prepare(&sql).unwrap();
+        let rows: Vec<String> = stmt
+            .query_map(rusqlite::params_from_iter(params.iter()), |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                "2025-03-01".to_owned(),
+                "2025-03-01T00:00:00+00:00".to_owned(),
+                "2025-03-01T12:00:00+00:00".to_owned(),
+                "2025-03-02T00:00:00+00:00".to_owned(),
+            ]
+        );
     }
 }
