@@ -303,11 +303,9 @@ pub fn append_date_string_cutoff_filter(
 ///   already sorts correctly against the bare date).
 ///
 /// Intended for SQLite `TEXT` columns storing RFC 3339 timestamps such as
-/// `"2025-03-01T12:00:00+00:00"`. The `+1 day` arithmetic is delegated to
-/// SQLite's `date()`, so callers only bind a `%Y-%m-%d` string — no Rust-side
-/// date math is required. Use [`append_date_string_cutoff_filter`] when the
-/// column is guaranteed to be date-only; the plain `<= ?` comparison there is
-/// sufficient and avoids the `date()` call.
+/// `"2025-03-01T12:00:00+00:00"`. Use [`append_date_string_cutoff_filter`]
+/// when the column is guaranteed to be date-only (plain `<= ?` suffices), or
+/// [`append_timestamp_cutoff_filter`] for integer millisecond columns.
 ///
 /// See [`append_eq_filter`] for the `column` security contract.
 pub fn append_timestamp_day_cutoff_filter(
@@ -835,10 +833,7 @@ mod tests {
     }
 
     // T-053: append_timestamp_day_cutoff_filter_day_inclusive_on_rfc3339_via_sqlite
-    // End-to-end: the helper must treat `--before 2025-03-01` as "on or before
-    // 2025-03-01", including RFC 3339 rows that fall anywhere within the
-    // boundary day. Verifies `date(?, '+1 day')` lifts the upper bound past
-    // the T-suffix timestamps that would otherwise sort after `"2025-03-01"`.
+    // Locks in that `date(?, '+1 day')` lifts the upper bound past T-suffix rows.
     #[test]
     fn append_timestamp_day_cutoff_filter_day_inclusive_on_rfc3339_via_sqlite() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
@@ -886,10 +881,7 @@ mod tests {
     }
 
     // T-054: append_timestamp_day_cutoff_filter_before_false_start_inclusive_on_rfc3339_via_sqlite
-    // End-to-end for `before = false`. The helper relies on RFC 3339 prefix
-    // sorting against a bare `YYYY-MM-DD` lower bound, so the boundary day
-    // must include both the bare date and every T-suffix value of that day
-    // while excluding the preceding day's final timestamp.
+    // Locks in that RFC 3339 prefix sort against a bare `YYYY-MM-DD` lower bound works.
     #[test]
     fn append_timestamp_day_cutoff_filter_before_false_start_inclusive_on_rfc3339_via_sqlite() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
