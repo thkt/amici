@@ -2,6 +2,18 @@
 
 use rurico::storage::MatchFtsQuery;
 
+/// Upper bound on `cross_product` output size — above this, OR-groups are dropped.
+///
+/// Prevents the O(Π m_i) memory blowup that occurs when short tokens vocab-expand
+/// to `(t1 OR t2 OR ... up to 25)` via `prepare_match_query` and stack with
+/// multiple OR-groups (worst observed: `8 × 25 × 25 × 12 × 20 × 25 = 30M` combos,
+/// ≈ 10 MB MATCH string, ≈ 81 GB resident — see issue #24).
+///
+/// At 100 the MATCH string stays under ~10 KB; downstream rerankers recover the
+/// recall lost on the small fraction of queries that hit the fallback
+/// (rurico eval: mrr / ndcg_at_10 unchanged versus a 10,000 cap).
+const MAX_COMBOS: usize = 100;
+
 /// Adapt a [`MatchFtsQuery`] for an FTS5 `trigram` tokenizer.
 ///
 /// The trigram tokenizer rejects `("a" OR "b") "c"` (a parenthesized OR-group
@@ -13,6 +25,10 @@ use rurico::storage::MatchFtsQuery;
 /// indexable terms (e.g. every OR-group alternative was sub-trigram); callers
 /// should treat this as "no results" rather than passing an empty string to
 /// FTS5 `MATCH`.
+///
+/// When the OR-distribution would generate more than [`MAX_COMBOS`] flat
+/// alternatives, the OR-groups are dropped and only `fixed` terms are used —
+/// a recall-loss fallback that prevents pathological memory blowup.
 pub fn clean_for_trigram(query: &MatchFtsQuery) -> Option<String> {
     clean_impl(query.as_str())
 }
@@ -20,12 +36,21 @@ pub fn clean_for_trigram(query: &MatchFtsQuery) -> Option<String> {
 fn clean_impl(match_query: &str) -> Option<String> {
     let cleaned: String = match_query.chars().filter(|c| !c.is_control()).collect();
     let (fixed, or_groups) = parse_fts_segments(&cleaned);
+    let fixed_only = || (!fixed.is_empty()).then(|| fixed.join(" "));
 
     if or_groups.is_empty() {
-        if fixed.is_empty() {
-            return None;
-        }
-        return Some(fixed.join(" "));
+        return fixed_only();
+    }
+
+    // Estimate Π m_i without materializing cross_product. Saturates at
+    // usize::MAX on overflow so the threshold check still fires.
+    let estimated_combos = or_groups
+        .iter()
+        .map(Vec::len)
+        .try_fold(1usize, usize::checked_mul)
+        .unwrap_or(usize::MAX);
+    if estimated_combos > MAX_COMBOS {
+        return fixed_only();
     }
 
     let combos = cross_product(&or_groups);
@@ -153,6 +178,43 @@ mod tests {
         // All fixed quoted tokens are <3 chars — trigram tokenizer cannot index them.
         assert_eq!(clean_impl("\"au\""), None);
         assert_eq!(clean_impl("\"a\" \"b\""), None);
+    }
+
+    #[test]
+    fn falls_back_to_fixed_only_when_combos_exceed_max() {
+        // 5 OR-groups × 3 terms = 243 combos > MAX_COMBOS (100).
+        // Distribution would explode; fallback drops OR-groups and returns
+        // only the fixed term.
+        let input = r#"("aaa" OR "bbb" OR "ccc") ("ddd" OR "eee" OR "fff") ("ggg" OR "hhh" OR "iii") ("jjj" OR "kkk" OR "lll") ("mmm" OR "nnn" OR "ooo") "fixed""#;
+        assert_eq!(
+            clean_impl(input).as_deref(),
+            Some("\"fixed\""),
+            "OR-groups should be dropped, fixed term retained"
+        );
+    }
+
+    #[test]
+    fn falls_back_to_none_when_combos_exceed_max_and_no_fixed() {
+        // Same combo count, no fixed term → no indexable content remains.
+        let input = r#"("aaa" OR "bbb" OR "ccc") ("ddd" OR "eee" OR "fff") ("ggg" OR "hhh" OR "iii") ("jjj" OR "kkk" OR "lll") ("mmm" OR "nnn" OR "ooo")"#;
+        assert_eq!(clean_impl(input), None);
+    }
+
+    #[test]
+    fn distributes_below_combo_threshold() {
+        // 4 OR-groups × 3 terms = 81 combos < MAX_COMBOS (100): distribute.
+        let input = r#"("aaa" OR "bbb" OR "ccc") ("ddd" OR "eee" OR "fff") ("ggg" OR "hhh" OR "iii") ("jjj" OR "kkk" OR "lll")"#;
+        let out = clean_impl(input).expect("should distribute below threshold");
+        assert_eq!(out.matches(" OR ").count(), 80, "81 combos = 80 OR joins");
+    }
+
+    #[test]
+    fn distributes_at_combo_threshold() {
+        // 5 × 5 × 4 = 100 combos = MAX_COMBOS: distributes (`>`, not `>=`).
+        // Pins the boundary so an off-by-one slip in the guard regresses here.
+        let input = r#"("a01" OR "a02" OR "a03" OR "a04" OR "a05") ("b01" OR "b02" OR "b03" OR "b04" OR "b05") ("c01" OR "c02" OR "c03" OR "c04")"#;
+        let out = clean_impl(input).expect("100 combos should distribute");
+        assert_eq!(out.matches(" OR ").count(), 99, "100 combos = 99 OR joins");
     }
 
     #[test]
