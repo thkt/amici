@@ -9,15 +9,28 @@ repository = "https://github.com/thkt/amici"
 
 [features]
 test-support = []
+eval-harness = []
+
+[[bin]]
+name = "eval_harness"
+path = "src/bin/eval_harness.rs"
+required-features = ["eval-harness"]
 
 [dependencies]
-rurico             = { git = "https://github.com/thkt/rurico", rev = "7b739d1" }
+rand               = "0.10"
+rand_chacha        = "0.10"
+rurico             = { git = "https://github.com/thkt/rurico", rev = "7d668ab" }
 rusqlite           = { version = "0.39", features = ["bundled"] }
+serde              = { version = "1", features = ["derive"] }
+serde_json         = "1"
+thiserror          = "2"
 tracing            = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
-rurico = { git = "https://github.com/thkt/rurico", rev = "7b739d1", features = ["test-support"] }
+rurico      = { git = "https://github.com/thkt/rurico", rev = "7d668ab", features = ["test-support"] }
+serial_test = "3"
+tempfile    = "3"
 
 [lints.rust]
 unsafe_code = "forbid"
