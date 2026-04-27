@@ -1,0 +1,333 @@
+{
+  "schema_version": "1.1",
+  "kind": "forward",
+  "captured_with": "eval_harness capture-baseline",
+  "timestamp": "epoch:1777265610",
+  "model_id": "cl-nagoya/ruri-v3-310m",
+  "model_revision": "pinned-via-rurico-embed-cache",
+  "mlx_rs_version": "0.25",
+  "fixture_hash": "fnv1a64:88afbfc4e99e0a84",
+  "aggregation": "identity",
+  "merge_config": {
+    "rrf_k": 60.0,
+    "source_weights": {
+      "vector": 1.0,
+      "fts": 1.0
+    }
+  },
+  "normalization": {
+    "nfkc": true,
+    "ascii_lowercase": true,
+    "collapse_whitespace": true
+  },
+  "global": [
+    {
+      "name": "recall@5",
+      "k": 5,
+      "point_estimate": 0.6299603174603176,
+      "ci_lower": 0.5985119047619046,
+      "ci_upper": 0.6635912698412697,
+      "uninformative": false
+    },
+    {
+      "name": "recall@10",
+      "k": 10,
+      "point_estimate": 0.7414682539682539,
+      "ci_lower": 0.7112103174603175,
+      "ci_upper": 0.774404761904762,
+      "uninformative": false
+    },
+    {
+      "name": "mrr@10",
+      "k": 10,
+      "point_estimate": 1.0,
+      "ci_lower": 1.0,
+      "ci_upper": 1.0,
+      "uninformative": false
+    },
+    {
+      "name": "ndcg@10",
+      "k": 10,
+      "point_estimate": 0.8929930705316574,
+      "ci_lower": 0.8761522102123755,
+      "ci_upper": 0.9062809356005043,
+      "uninformative": false
+    }
+  ],
+  "per_category": {
+    "comparative": [
+      {
+        "name": "recall@5",
+        "k": 5,
+        "point_estimate": 0.6095238095238096,
+        "ci_lower": 0.5119047619047619,
+        "ci_upper": 0.7047619047619047,
+        "uninformative": false
+      },
+      {
+        "name": "recall@10",
+        "k": 10,
+        "point_estimate": 0.7571428571428571,
+        "ci_lower": 0.6547619047619048,
+        "ci_upper": 0.8428571428571429,
+        "uninformative": false
+      },
+      {
+        "name": "mrr@10",
+        "k": 10,
+        "point_estimate": 1.0,
+        "ci_lower": 1.0,
+        "ci_upper": 1.0,
+        "uninformative": false
+      },
+      {
+        "name": "ndcg@10",
+        "k": 10,
+        "point_estimate": 0.8983317922434706,
+        "ci_lower": 0.8563901996271307,
+        "ci_upper": 0.9325460147776281,
+        "uninformative": false
+      }
+    ],
+    "conceptual": [
+      {
+        "name": "recall@5",
+        "k": 5,
+        "point_estimate": 0.5682539682539682,
+        "ci_lower": 0.4888888888888888,
+        "ci_upper": 0.6420634920634921,
+        "uninformative": false
+      },
+      {
+        "name": "recall@10",
+        "k": 10,
+        "point_estimate": 0.676984126984127,
+        "ci_lower": 0.5833333333333334,
+        "ci_upper": 0.7634920634920634,
+        "uninformative": false
+      },
+      {
+        "name": "mrr@10",
+        "k": 10,
+        "point_estimate": 1.0,
+        "ci_lower": 1.0,
+        "ci_upper": 1.0,
+        "uninformative": false
+      },
+      {
+        "name": "ndcg@10",
+        "k": 10,
+        "point_estimate": 0.8703370297846807,
+        "ci_lower": 0.8326182473316168,
+        "ci_upper": 0.9046574980745109,
+        "uninformative": false
+      }
+    ],
+    "definitional": [
+      {
+        "name": "recall@5",
+        "k": 5,
+        "point_estimate": 0.5801587301587302,
+        "ci_lower": 0.4888888888888888,
+        "ci_upper": 0.6753968253968254,
+        "uninformative": false
+      },
+      {
+        "name": "recall@10",
+        "k": 10,
+        "point_estimate": 0.7468253968253968,
+        "ci_lower": 0.6365079365079366,
+        "ci_upper": 0.8571428571428571,
+        "uninformative": true
+      },
+      {
+        "name": "mrr@10",
+        "k": 10,
+        "point_estimate": 1.0,
+        "ci_lower": 1.0,
+        "ci_upper": 1.0,
+        "uninformative": false
+      },
+      {
+        "name": "ndcg@10",
+        "k": 10,
+        "point_estimate": 0.8884103087687821,
+        "ci_lower": 0.8511654643804011,
+        "ci_upper": 0.9240010568777395,
+        "uninformative": false
+      }
+    ],
+    "factoid": [
+      {
+        "name": "recall@5",
+        "k": 5,
+        "point_estimate": 0.6865079365079364,
+        "ci_lower": 0.5992063492063492,
+        "ci_upper": 0.765873015873016,
+        "uninformative": false
+      },
+      {
+        "name": "recall@10",
+        "k": 10,
+        "point_estimate": 0.753968253968254,
+        "ci_lower": 0.6626984126984127,
+        "ci_upper": 0.8412698412698413,
+        "uninformative": false
+      },
+      {
+        "name": "mrr@10",
+        "k": 10,
+        "point_estimate": 1.0,
+        "ci_lower": 1.0,
+        "ci_upper": 1.0,
+        "uninformative": false
+      },
+      {
+        "name": "ndcg@10",
+        "k": 10,
+        "point_estimate": 0.9185756327347544,
+        "ci_lower": 0.8939517700954362,
+        "ci_upper": 0.941254666473713,
+        "uninformative": false
+      }
+    ],
+    "howto": [
+      {
+        "name": "recall@5",
+        "k": 5,
+        "point_estimate": 0.6277777777777779,
+        "ci_lower": 0.5349206349206349,
+        "ci_upper": 0.7285714285714286,
+        "uninformative": false
+      },
+      {
+        "name": "recall@10",
+        "k": 10,
+        "point_estimate": 0.7484126984126984,
+        "ci_lower": 0.665079365079365,
+        "ci_upper": 0.826984126984127,
+        "uninformative": false
+      },
+      {
+        "name": "mrr@10",
+        "k": 10,
+        "point_estimate": 1.0,
+        "ci_lower": 1.0,
+        "ci_upper": 1.0,
+        "uninformative": false
+      },
+      {
+        "name": "ndcg@10",
+        "k": 10,
+        "point_estimate": 0.8508233540703584,
+        "ci_lower": 0.7646722904276082,
+        "ci_upper": 0.9174426666621226,
+        "uninformative": false
+      }
+    ],
+    "listing": [
+      {
+        "name": "recall@5",
+        "k": 5,
+        "point_estimate": 0.5476190476190477,
+        "ci_lower": 0.46904761904761905,
+        "ci_upper": 0.6309523809523809,
+        "uninformative": false
+      },
+      {
+        "name": "recall@10",
+        "k": 10,
+        "point_estimate": 0.7,
+        "ci_lower": 0.6166666666666666,
+        "ci_upper": 0.7785714285714287,
+        "uninformative": false
+      },
+      {
+        "name": "mrr@10",
+        "k": 10,
+        "point_estimate": 1.0,
+        "ci_lower": 1.0,
+        "ci_upper": 1.0,
+        "uninformative": false
+      },
+      {
+        "name": "ndcg@10",
+        "k": 10,
+        "point_estimate": 0.8744565124001691,
+        "ci_lower": 0.8442136605507112,
+        "ci_upper": 0.9032185061447183,
+        "uninformative": false
+      }
+    ],
+    "troubleshooting": [
+      {
+        "name": "recall@5",
+        "k": 5,
+        "point_estimate": 0.65,
+        "ci_lower": 0.5666666666666667,
+        "ci_upper": 0.7380952380952381,
+        "uninformative": false
+      },
+      {
+        "name": "recall@10",
+        "k": 10,
+        "point_estimate": 0.7547619047619047,
+        "ci_lower": 0.6761904761904761,
+        "ci_upper": 0.8452380952380952,
+        "uninformative": false
+      },
+      {
+        "name": "mrr@10",
+        "k": 10,
+        "point_estimate": 1.0,
+        "ci_lower": 1.0,
+        "ci_upper": 1.0,
+        "uninformative": false
+      },
+      {
+        "name": "ndcg@10",
+        "k": 10,
+        "point_estimate": 0.906720822112825,
+        "ci_lower": 0.8718830780638507,
+        "ci_upper": 0.939301680065366,
+        "uninformative": false
+      }
+    ],
+    "variant_notation": [
+      {
+        "name": "recall@5",
+        "k": 5,
+        "point_estimate": 0.7698412698412698,
+        "ci_lower": 0.6587301587301587,
+        "ci_upper": 0.8730158730158731,
+        "uninformative": true
+      },
+      {
+        "name": "recall@10",
+        "k": 10,
+        "point_estimate": 0.7936507936507935,
+        "ci_lower": 0.6746031746031746,
+        "ci_upper": 0.8968253968253967,
+        "uninformative": true
+      },
+      {
+        "name": "mrr@10",
+        "k": 10,
+        "point_estimate": 1.0,
+        "ci_lower": 1.0,
+        "ci_upper": 1.0,
+        "uninformative": false
+      },
+      {
+        "name": "ndcg@10",
+        "k": 10,
+        "point_estimate": 0.9362891121382129,
+        "ci_lower": 0.9099351071237409,
+        "ci_upper": 0.9606261115951567,
+        "uninformative": false
+      }
+    ]
+  },
+  "latency_p50_ms": 516.0,
+  "latency_p95_ms": 650.0
+}

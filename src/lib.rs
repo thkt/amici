@@ -1,4 +1,6 @@
 pub mod cli;
+#[cfg(feature = "eval-harness")]
+pub mod eval;
 pub mod logging;
 pub mod migration;
 pub mod model;

@@ -128,7 +128,7 @@ fn cross_product(groups: &[Vec<String>]) -> Vec<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rurico::storage::prepare_match_query;
+    use rurico::storage::{QueryNormalizationConfig, prepare_match_query};
     use rusqlite::Connection;
 
     #[test]
@@ -221,7 +221,13 @@ mod tests {
     fn accepts_live_prepare_match_query_output() {
         // Integration: rurico sanitizes, amici adapts and returns Some.
         let conn = Connection::open_in_memory().unwrap();
-        let matched = prepare_match_query(&conn, "hello world", "nonexistent_vocab").unwrap();
+        let matched = prepare_match_query(
+            &conn,
+            "hello world",
+            "nonexistent_vocab",
+            &QueryNormalizationConfig::default(),
+        )
+        .unwrap();
         assert_eq!(
             clean_for_trigram(&matched).as_deref(),
             Some("\"hello\" \"world\"")

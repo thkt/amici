@@ -1,0 +1,7 @@
+{
+  "captured_with": "eval_harness capture-reverse-baseline",
+  "k": 10,
+  "kind": "reverse",
+  "observed_lower_bound": 0.47909084298136606,
+  "schema_version": "1.1"
+}
