@@ -12,9 +12,9 @@
 
 use std::iter;
 
-use rusqlite::{Connection, Row, types::ToSql};
+use rusqlite::{Connection, Row, params_from_iter, types::ToSql};
 
-use crate::storage::filter::{anon_placeholders, as_sql_params};
+use crate::storage::filter::anon_placeholders;
 
 /// Collects an iterator of `Result<T, rusqlite::Error>` into any
 /// [`FromIterator`]-implementing collection.
@@ -60,7 +60,7 @@ where
     C: FromIterator<T>,
     E: From<rusqlite::Error>,
 {
-    rows.collect::<Result<C, _>>().map_err(Into::into)
+    rows.collect::<Result<C, _>>().map_err(E::from)
 }
 
 /// Runs a SQL `IN ({placeholders})` query against `keys` and collects rows
@@ -110,7 +110,11 @@ where
 ///
 /// Returns any error from [`Connection::prepare`],
 /// [`rusqlite::Statement::query_map`], or row collection, converted into `E`
-/// via [`From<rusqlite::Error>`].
+/// via [`From<rusqlite::Error>`]. In particular, [`Connection::prepare`]
+/// fails when `keys.len()` exceeds SQLite's `SQLITE_MAX_VARIABLE_NUMBER`
+/// (default 32766 in SQLite ≥ 3.32.0, 999 in older builds). The caller is
+/// responsible for chunking larger key sets — this helper does not split
+/// internally.
 pub fn fetch_by_in_clause<P, T, C, E, F>(
     conn: &Connection,
     keys: &[P],
@@ -129,11 +133,10 @@ where
     let placeholders = anon_placeholders(keys.len());
     let sql = sql_template.replace("{placeholders}", &placeholders);
     let mut stmt = conn.prepare(&sql).map_err(E::from)?;
-    let params = as_sql_params(keys);
     let rows = stmt
-        .query_map(params.as_slice(), map_row)
+        .query_map(params_from_iter(keys.iter()), map_row)
         .map_err(E::from)?;
-    rows.collect::<Result<C, _>>().map_err(Into::into)
+    collect_rows(rows)
 }
 
 #[cfg(test)]
