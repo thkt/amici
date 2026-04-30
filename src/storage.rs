@@ -1,5 +1,6 @@
 pub mod filter;
 pub mod fts;
+pub mod query_helpers;
 
 pub use filter::{
     anon_placeholders, append_date_string_cutoff_filter, append_eq_filter, append_exclude_ids,
@@ -7,3 +8,4 @@ pub use filter::{
     append_timestamp_cutoff_filter, append_timestamp_day_cutoff_filter, as_sql_params, escape_like,
     in_placeholders, like_prefix_match,
 };
+pub use query_helpers::{collect_rows, fetch_by_in_clause};

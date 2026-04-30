@@ -9,7 +9,8 @@ sae/yomu/recall ツールチェーンで共有するモデルローディング�
 | `model` | `DegradedReason`, `degraded_reason_user_note`, `ModelLoad<T>`, `ModelDownloadError`, `download_and_verify_model` |
 | `model::embedder` | `try_load_embedder_with` — エンベディングモデルをロード |
 | `model::reranker` | `try_load_reranker_with` — リランキングモデルをロード |
-| `storage` | `in_placeholders`, `anon_placeholders`, `as_sql_params`, `append_eq_filter` |
+| `storage::filter` | `in_placeholders`, `anon_placeholders`, `as_sql_params`, `append_eq_filter`, … — SQL `WHERE` 句とパラメータの構築ヘルパー |
+| `storage::query_helpers` | `collect_rows`, `fetch_by_in_clause` — `Connection` を取って行を回収する実行系ヘルパー（コレクション型・エラー型を generic にサポート） |
 | `cli` | `Spinner`, `with_spinner`, `try_expand_shorthand` |
 | `migration` | `notify_schema_change` — スキーマクリア通知用の `tracing::warn!` 統一実装 |
 | `logging` | `init_subscriber` — `RUST_LOG` 対応の `tracing_subscriber::fmt` 初期化（CLI `main.rs` 用） |
