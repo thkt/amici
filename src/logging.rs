@@ -7,10 +7,8 @@ use std::io;
 
 use tracing_subscriber::EnvFilter;
 
-/// Default directive automatically merged into every CLI's filter so rurico's
-/// recoverable-anomaly warnings (embedder / reranker / model_probe degraded
-/// paths) are visible to operators by default. Callers can override via
-/// `RUST_LOG`.
+/// Default directive merged into every CLI's filter. See
+/// [`init_subscriber`] for the merge semantics and `RUST_LOG` interaction.
 const RURICO_DEFAULT_DIRECTIVE: &str = "rurico=warn";
 
 /// Installs a `tracing_subscriber::fmt` subscriber that writes to stderr and
@@ -99,8 +97,6 @@ mod tests {
     #[test]
     fn merge_default_directives_produces_parseable_filter() {
         let merged = merge_default_directives("sae=info,hyper=warn");
-        // EnvFilter::new panics on invalid directive; reaching the assertion
-        // proves the merged string parses cleanly.
-        drop(EnvFilter::new(&merged));
+        EnvFilter::try_new(&merged).expect("merged default filter must parse");
     }
 }
