@@ -11,7 +11,7 @@ Shared model-loading, storage helpers, and CLI utilities for the sae/yomu/recall
 | `model::reranker` | `try_load_reranker_with` — loads the reranking model |
 | `storage::filter` | `in_placeholders`, `anon_placeholders`, `as_sql_params`, `append_eq_filter`, … — SQL `WHERE` clause and parameter builders |
 | `storage::query_helpers` | `collect_rows`, `fetch_by_in_clause` — `Connection`-bound row collectors and IN-clause bulk fetch (generic over collection and error type) |
-| `cli` | `Spinner`, `with_spinner`, `try_expand_shorthand` |
+| `cli` | `Spinner`, `with_spinner`, `try_expand_shorthand`, `env_lookup`, `CliError`, `exit_code::codes` |
 | `migration` | `notify_schema_change` — unified `tracing::warn!` for schema-clear notices |
 | `logging` | `init_subscriber` — `RUST_LOG`-aware `tracing_subscriber::fmt` setup for CLI `main.rs` |
 
@@ -21,6 +21,140 @@ Shared model-loading, storage helpers, and CLI utilities for the sae/yomu/recall
 [dependencies]
 amici = { git = "https://github.com/thkt/amici", rev = "<rev>" }
 ```
+
+## CLI conventions
+
+### Dependency injection for env-var lookup
+
+CLIs that read environment variables in a constructor cannot be tested
+deterministically — `for_test` helpers silently bypass the env path, so the
+code that runs in production never sees a unit test. Split the constructor
+into `from_env()` and `from_env_with(impl Fn(&str) -> Option<String>)`, and
+use `amici::cli::env_lookup()` as the production lookup.
+
+**Before** (yomu `tools.rs`):
+
+```rust
+impl Yomu {
+    pub fn with_root(root: PathBuf, options: YomuOptions) -> Result<Self, YomuError> {
+        // ...
+        let embed_disabled = options.no_embed || env::var("YOMU_EMBED").as_deref() == Ok("0");
+        let rerank_enabled = env::var("YOMU_RERANK").as_deref() == Ok("1");
+        // ...
+    }
+}
+```
+
+**After**:
+
+```rust
+use amici::cli::env_lookup;
+
+pub struct YomuConfig {
+    pub embed_disabled: bool,
+    pub rerank_enabled: bool,
+}
+
+impl YomuConfig {
+    pub fn from_env() -> Self {
+        Self::from_env_with(env_lookup())
+    }
+    pub fn from_env_with<F: Fn(&str) -> Option<String>>(get: F) -> Self {
+        Self {
+            embed_disabled: get("YOMU_EMBED").as_deref() == Some("0"),
+            rerank_enabled: get("YOMU_RERANK").as_deref() == Some("1"),
+        }
+    }
+}
+
+impl Yomu {
+    pub fn with_root(root: PathBuf, options: YomuOptions, config: YomuConfig) -> Result<Self, YomuError> {
+        let embed_disabled = options.no_embed || config.embed_disabled;
+        // ...
+    }
+}
+```
+
+Tests then construct `YomuConfig` directly without touching process env:
+
+```rust
+let cfg = YomuConfig::from_env_with(|k| match k {
+    "YOMU_EMBED" => Some("0".into()),
+    _ => None,
+});
+```
+
+`env::var_os` (path resolution returning `OsString`) is out of scope — keep
+those as a separate factory if your CLI mixes both.
+
+`Option<String>` is the canonical signature for amici. Any pre-existing
+`from_env_with(impl Fn(&str) -> Result<String, VarError>)` site (sae has
+two: `EsaClient::from_env_with`, `data_dir_with`) is expected to be
+migrated to `Option<String>` during downstream rollout — `get(k).ok()`
+is the adapter when an existing site cannot move yet.
+
+### Exit code convention
+
+Implement `amici::cli::CliError` on the crate-level error enum so `main.rs`
+can call `e.exit_code()` directly instead of maintaining a hand-written
+`exit_code_for(&e)` helper. Distinct codes per variant let LLMs and shell
+scripts branch on retry policy.
+
+The `amici::cli::exit_code::codes` module exposes the
+[sysexits.h](https://man.openbsd.org/sysexits.3) convention as `u8` constants
+(see the module doc for why `u8` rather than `ExitCode`). These are
+**recommended, not required** — pick any schema that gives distinct codes
+per variant.
+
+**Before** (yomu `main.rs`):
+
+```rust
+fn exit_code_for(e: &YomuError) -> ExitCode {
+    match e {
+        YomuError::InvalidInput(_) => ExitCode::from(2),
+        YomuError::Internal(_) => ExitCode::from(4),
+        YomuError::Storage(_)
+        | YomuError::Io(_)
+        | YomuError::Index(_)
+        | YomuError::Query(_)
+        | YomuError::EmbedderUnavailable(_) => ExitCode::FAILURE, // collapsed
+    }
+}
+```
+
+**After**:
+
+```rust
+use amici::cli::CliError;
+use amici::cli::exit_code::codes;
+use std::process::ExitCode;
+
+impl CliError for YomuError {
+    fn exit_code(&self) -> ExitCode {
+        match self {
+            Self::InvalidInput(_)        => ExitCode::from(codes::USAGE),
+            Self::Internal(_)            => ExitCode::from(codes::SOFTWARE),
+            Self::Storage(_)             => ExitCode::from(codes::CANT_CREAT),
+            Self::Io(_)                  => ExitCode::from(codes::IO_ERR),
+            Self::Index(_)               => ExitCode::from(codes::CANT_CREAT),
+            Self::Query(_)               => ExitCode::from(codes::SOFTWARE),
+            Self::EmbedderUnavailable(_) => ExitCode::from(codes::TEMP_FAIL),
+        }
+    }
+}
+
+// main.rs
+return e.exit_code();
+```
+
+Document the chosen mapping in each CLI's README or `--help` output so callers
+can write deterministic retry logic.
+
+> **Migration note**: switching from a CLI's existing schema (e.g. yomu's
+> `2` / `4` / `FAILURE`) to sysexits constants changes the **numeric exit
+> codes** observed by callers (e.g. `2` → `64`, `4` → `70`). Shell scripts,
+> CI pipelines, and parent processes that branch on a specific number must
+> be updated. Announce the change in the CLI's release notes.
 
 ## Development
 
