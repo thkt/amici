@@ -20,3 +20,24 @@ Shared model-loading, storage helpers, and CLI utilities for the sae/yomu/recall
 [dependencies]
 amici = { git = "https://github.com/thkt/amici", rev = "<rev>" }
 ```
+
+## Development
+
+### Setup
+
+Run once after cloning:
+
+```sh
+git config --local core.hooksPath .githooks
+```
+
+This installs a pre-commit hook that runs `cargo fmt --check` and `cargo clippy --all-targets --all-features -- -D warnings` before each commit. Violations abort the commit. To skip for one commit: `git commit --no-verify`.
+
+### Common commands
+
+```sh
+just check                                                # test + lint + fmt-check
+cargo test --all-features                                 # tests only
+cargo clippy --all-targets --all-features -- -D warnings  # lint (matches CI)
+cargo fmt -- --check                                      # format check
+```
