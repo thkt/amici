@@ -6,7 +6,7 @@ sae/yomu/recall ツールチェーンで共有するモデルローディング�
 
 | Module | Contents |
 | ------ | -------- |
-| `model` | `DegradedReason`, `degraded_reason_user_note`, `ModelLoad<T>`, `ModelDownloadError`, `download_and_verify_model` |
+| `model` | `DegradedReason`, `degraded_reason_user_note`, `degrade_with_warn`, `record_degraded`, `ModelLoad<T>`, `ModelDownloadError`, `download_and_verify_model` |
 | `model::embedder` | `try_load_embedder_with` — エンベディングモデルをロード |
 | `model::reranker` | `try_load_reranker_with` — リランキングモデルをロード |
 | `storage::filter` | `in_placeholders`, `anon_placeholders`, `as_sql_params`, `append_eq_filter`, … — SQL `WHERE` 句とパラメータの構築ヘルパー |

@@ -6,7 +6,7 @@ Shared model-loading, storage helpers, and CLI utilities for the sae/yomu/recall
 
 | Module | Contents |
 | ------ | -------- |
-| `model` | `DegradedReason`, `degraded_reason_user_note`, `ModelLoad<T>`, `ModelDownloadError`, `download_and_verify_model` |
+| `model` | `DegradedReason`, `degraded_reason_user_note`, `degrade_with_warn`, `record_degraded`, `ModelLoad<T>`, `ModelDownloadError`, `download_and_verify_model` |
 | `model::embedder` | `try_load_embedder_with` — loads the embedding model |
 | `model::reranker` | `try_load_reranker_with` — loads the reranking model |
 | `storage::filter` | `in_placeholders`, `anon_placeholders`, `as_sql_params`, `append_eq_filter`, … — SQL `WHERE` clause and parameter builders |
@@ -92,6 +92,73 @@ those as a separate factory if your CLI mixes both.
 two: `EsaClient::from_env_with`, `data_dir_with`) is expected to be
 migrated to `Option<String>` during downstream rollout — `get(k).ok()`
 is the adapter when an existing site cannot move yet.
+
+### Degraded path notification
+
+When a typed error is collapsed into a `DegradedReason` (embedder/reranker
+unavailable, probe failed, …), emit a `tracing::warn!` event so the original
+error and the degraded reason are both observable in logs. Silent collapse
+(`map_err(|_| DegradedReason::ProbeFailed)`) and ad-hoc inline `warn!` calls
+hide regressions and drift across crates.
+
+Use one of the two helpers in `amici::model`:
+
+- `degrade_with_warn(context, reason)` — returns a `map_err` closure. Use when
+  the call site has a typed error that needs to be collapsed.
+- `record_degraded(reason, context)` — direct emit. Use when the call site
+  already holds a `DegradedReason` value (no original error to preserve).
+
+Both emit a structured warn event with the message `"operation degraded"` and
+the fields `reason`, `context`, and (for `degrade_with_warn`) `error`.
+
+**Before** (silent collapse):
+
+```rust
+let task_emb = embedder.embed_query(task)
+    .map_err(|_| DegradedReason::ProbeFailed)?;
+```
+
+**After**:
+
+```rust
+use amici::model::{degrade_with_warn, DegradedReason};
+
+let task_emb = embedder.embed_query(task)
+    .map_err(degrade_with_warn(
+        "brief seed inference: embed_query",
+        DegradedReason::ProbeFailed,
+    ))?;
+```
+
+**Before** (inline warn that drifts in wording across call sites):
+
+```rust
+match self.infer_seed_paths(/* ... */) {
+    Ok(paths) => { /* ... */ }
+    Err(reason) => {
+        eprintln!("warning: seed inference degraded ({reason})");
+        degraded = true;
+    }
+}
+```
+
+**After**:
+
+```rust
+use amici::model::record_degraded;
+
+match self.infer_seed_paths(/* ... */) {
+    Ok(paths) => { /* ... */ }
+    Err(reason) => {
+        record_degraded(reason, "brief: seed inference");
+        degraded = true;
+    }
+}
+```
+
+The two helpers compose with `notify_schema_change` and
+`try_load_embedder_with` — pick the helper whose input shape matches the call
+site instead of mixing notification policies.
 
 ### Exit code convention
 
