@@ -1,7 +1,9 @@
 use std::io;
 use std::sync::Arc;
 
-use rurico::embed::{Artifacts, Embed, EmbedInitError, Embedder, ProbeStatus};
+use rurico::embed::{
+    Artifacts, Embed, EmbedInitError, Embedder, ModelId, ProbeStatus, cached_artifacts,
+};
 
 pub use super::{DegradedReason, degraded_reason_user_note};
 
@@ -36,6 +38,53 @@ pub fn try_load_embedder_with<CE>(
         Embedder::probe,
         Embedder::new,
         Artifacts::delete_files,
+    )
+}
+
+/// Preset wrapper around [`try_load_embedder_with`] that uses the default
+/// model cache lookup and a default `tracing::warn!`-based logging policy
+/// for the `on_delete_error` and `on_probe_err` callbacks.
+///
+/// Use this when the caller has no special logging requirements. Callers
+/// that need custom logging should use [`try_load_embedder_with`] directly.
+///
+/// # Errors
+///
+/// Same as [`try_load_embedder_with`].
+///
+/// # Examples
+///
+/// ```no_run
+/// use amici::model::embedder::try_load_embedder_default_logging;
+///
+/// let embedder = try_load_embedder_default_logging()?;
+/// # Ok::<(), amici::model::embedder::DegradedReason>(())
+/// ```
+pub fn try_load_embedder_default_logging() -> Result<Arc<dyn Embed>, DegradedReason> {
+    try_load_embedder_default_logging_with_fns(
+        || cached_artifacts(ModelId::default()),
+        Embedder::probe,
+        Embedder::new,
+        Artifacts::delete_files,
+    )
+}
+
+pub(super) fn try_load_embedder_default_logging_with_fns<A, E, CE>(
+    cache_check: impl FnOnce() -> Result<Option<A>, CE>,
+    probe_fn: impl FnOnce(&A) -> Result<ProbeStatus, EmbedInitError>,
+    new_fn: impl FnOnce(&A) -> Result<E, EmbedInitError>,
+    delete_fn: impl FnOnce(A) -> Result<(), io::Error>,
+) -> Result<Arc<dyn Embed>, DegradedReason>
+where
+    E: Embed + 'static,
+{
+    try_load_embedder_with_fns(
+        cache_check,
+        |e| tracing::warn!(error = %e, "failed to delete corrupt model files"),
+        |e| tracing::warn!(error = %e, "embedder probe failed"),
+        probe_fn,
+        new_fn,
+        delete_fn,
     )
 }
 
@@ -284,5 +333,17 @@ mod tests {
             !on_delete_error_called.get(),
             "on_delete_error must not be called when delete succeeds"
         );
+    }
+
+    // T-117: default_logging_preset_returns_arc_embed
+    #[test]
+    fn default_logging_preset_returns_arc_embed() {
+        let result = try_load_embedder_default_logging_with_fns(
+            cache_present(),
+            |_| Ok(ProbeStatus::Available),
+            |_| Ok(MockEmbedder::default()),
+            |_| unreachable!("delete must not be called on success"),
+        );
+        assert!(result.is_ok(), "default-logging preset should succeed");
     }
 }
