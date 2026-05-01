@@ -1916,11 +1916,10 @@ dependencies = [
 [[package]]
 name = "rurico"
 version = "0.2.0"
-source = "git+https://github.com/thkt/rurico?rev=ef26de2#ef26de21cf0ef3d50f8c6dfbc8b06cf65bab0e16"
+source = "git+https://github.com/thkt/rurico?rev=0c0e0f6#0c0e0f6c93c2705d1d76304a15fc8549da07052b"
 dependencies = [
  "bytemuck",
  "hf-hub",
- "log",
  "mlx-rs",
  "rand 0.10.1",
  "rand_chacha 0.10.0",
@@ -1930,13 +1929,14 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokenizers",
+ "tracing",
  "unicode-normalization",
 ]
 
 [[package]]
 name = "rurico-ffi"
 version = "0.1.0"
-source = "git+https://github.com/thkt/rurico?rev=ef26de2#ef26de21cf0ef3d50f8c6dfbc8b06cf65bab0e16"
+source = "git+https://github.com/thkt/rurico?rev=0c0e0f6#0c0e0f6c93c2705d1d76304a15fc8549da07052b"
 dependencies = [
  "mlx-sys",
  "rusqlite",
