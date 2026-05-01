@@ -287,6 +287,7 @@ where
 mod tests {
     use std::cell::Cell;
     use std::io;
+    use std::mem;
     use std::sync::{Arc, Mutex};
 
     use rurico::embed::MockEmbedder;
@@ -300,8 +301,8 @@ mod tests {
 
     impl CapturedWriter {
         fn captured(&self) -> String {
-            String::from_utf8(self.0.lock().expect("captured buffer poisoned").clone())
-                .expect("captured bytes are not UTF-8")
+            let bytes = mem::take(&mut *self.0.lock().expect("captured buffer poisoned"));
+            String::from_utf8(bytes).expect("captured bytes are not UTF-8")
         }
     }
 
