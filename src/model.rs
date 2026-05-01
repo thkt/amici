@@ -56,6 +56,66 @@ pub fn degraded_reason_user_note(reason: DegradedReason) -> Option<&'static str>
     }
 }
 
+/// Returns a `map_err` closure that logs the original error via `tracing::warn!`
+/// and yields a [`DegradedReason`] for the degraded path.
+///
+/// Use this at call sites that drop a typed error in favor of a coarse
+/// `DegradedReason`. The original error is preserved in the structured
+/// `error` field of the warn event so log consumers can still see the cause.
+///
+/// The structured warn event carries `error`, `reason`, and `context` fields
+/// with the message `"operation degraded"`.
+///
+/// # Examples
+///
+/// ```no_run
+/// # use amici::model::{degrade_with_warn, DegradedReason};
+/// # fn embed_query(_: &str) -> Result<Vec<f32>, &'static str> { Ok(vec![]) }
+/// let task_emb = embed_query("hello").map_err(degrade_with_warn(
+///     "brief seed inference: embed_query",
+///     DegradedReason::ProbeFailed,
+/// ))?;
+/// # Ok::<(), DegradedReason>(())
+/// ```
+pub fn degrade_with_warn<E: fmt::Display>(
+    context: &'static str,
+    reason: DegradedReason,
+) -> impl FnOnce(E) -> DegradedReason {
+    move |e| {
+        tracing::warn!(error = %e, ?reason, context, "operation degraded");
+        reason
+    }
+}
+
+/// Emits a `tracing::warn!` for an already-known [`DegradedReason`] with no
+/// underlying error to preserve.
+///
+/// Use this when the degraded path is reached from a `Result<_, DegradedReason>`
+/// (or similar) where no original error exists and only the reason needs to
+/// be reported. For the `map_err` case, prefer [`degrade_with_warn`].
+///
+/// The structured warn event carries `reason` and `context` fields with the
+/// message `"operation degraded"`.
+///
+/// # Examples
+///
+/// ```no_run
+/// # use amici::model::{record_degraded, DegradedReason};
+/// # fn infer_seed_paths() -> Result<Vec<String>, DegradedReason> { Ok(vec![]) }
+/// let mut degraded = false;
+/// match infer_seed_paths() {
+///     Ok(_paths) => {}
+///     Err(reason) => {
+///         record_degraded(reason, "brief: seed inference");
+///         degraded = true;
+///     }
+/// }
+/// # let _ = degraded;
+/// ```
+pub fn record_degraded(reason: DegradedReason, context: &str) {
+    tracing::warn!(?reason, context, "operation degraded");
+}
+
 /// Outcome of a model-load attempt.
 ///
 /// Callers should inspect the variant to handle the `Failed` case — dropping a
@@ -226,10 +286,56 @@ where
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
+    use std::io;
+    use std::mem;
+    use std::sync::{Arc, Mutex};
 
     use rurico::embed::MockEmbedder;
+    use tracing::subscriber::with_default;
+    use tracing_subscriber::fmt::MakeWriter;
 
     use super::*;
+
+    #[derive(Clone, Default)]
+    struct CapturedWriter(Arc<Mutex<Vec<u8>>>);
+
+    impl CapturedWriter {
+        fn captured(&self) -> String {
+            let bytes = mem::take(&mut *self.0.lock().expect("captured buffer poisoned"));
+            String::from_utf8(bytes).expect("captured bytes are not UTF-8")
+        }
+    }
+
+    impl io::Write for CapturedWriter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.0
+                .lock()
+                .expect("captured buffer poisoned")
+                .extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> MakeWriter<'a> for CapturedWriter {
+        type Writer = Self;
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    fn capture_warn(emit: impl FnOnce()) -> String {
+        let writer = CapturedWriter::default();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(writer.clone())
+            .with_max_level(tracing::Level::WARN)
+            .with_ansi(false)
+            .finish();
+        with_default(subscriber, emit);
+        writer.captured()
+    }
 
     // T-019: as_ref_returns_inner_only_for_ready
     #[test]
@@ -360,5 +466,61 @@ mod tests {
             ),
             other => panic!("expected ProbeFailed, got {other:?}"),
         }
+    }
+
+    fn always_fails(msg: &'static str) -> Result<(), &'static str> {
+        Err(msg)
+    }
+
+    // T-027: degrade_with_warn_returns_closure_yielding_reason
+    #[test]
+    fn degrade_with_warn_returns_closure_yielding_reason() {
+        let to_reason = degrade_with_warn("ctx", DegradedReason::ProbeFailed);
+        let result = always_fails("inner err").map_err(to_reason);
+        assert_eq!(result, Err(DegradedReason::ProbeFailed));
+    }
+
+    // T-028: degrade_with_warn_emits_warn_with_error_and_context
+    #[test]
+    fn degrade_with_warn_emits_warn_with_error_and_context() {
+        let captured = capture_warn(|| {
+            let to_reason = degrade_with_warn("test ctx", DegradedReason::BackendUnavailable);
+            let _ = always_fails("inner err msg").map_err(to_reason);
+        });
+        assert!(captured.contains("WARN"), "missing WARN level: {captured}");
+        assert!(
+            captured.contains("operation degraded"),
+            "missing message: {captured}"
+        );
+        assert!(
+            captured.contains("inner err msg"),
+            "missing original error: {captured}"
+        );
+        assert!(
+            captured.contains("BackendUnavailable"),
+            "missing reason: {captured}"
+        );
+        assert!(captured.contains("test ctx"), "missing context: {captured}");
+    }
+
+    // T-029: record_degraded_emits_warn_with_context
+    #[test]
+    fn record_degraded_emits_warn_with_context() {
+        let captured = capture_warn(|| {
+            record_degraded(DegradedReason::ProbeFailed, "seed inference");
+        });
+        assert!(captured.contains("WARN"), "missing WARN level: {captured}");
+        assert!(
+            captured.contains("operation degraded"),
+            "missing message: {captured}"
+        );
+        assert!(
+            captured.contains("ProbeFailed"),
+            "missing reason: {captured}"
+        );
+        assert!(
+            captured.contains("seed inference"),
+            "missing context: {captured}"
+        );
     }
 }
