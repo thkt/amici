@@ -46,7 +46,7 @@ use rurico::retrieval::{
 };
 use rurico::sandbox::exit_if_seatbelt;
 use rurico::storage::QueryNormalizationConfig;
-use rurico::{embed, model_probe, reranker};
+use rurico::{embed, reranker};
 
 /// Mock-friendly bundle of every external seam the four mode handlers touch.
 ///
@@ -405,7 +405,7 @@ impl MetricSpec {
 }
 
 fn main() -> ExitCode {
-    model_probe::handle_probe_if_needed();
+    rurico::handle_probe_if_needed();
     exit_if_seatbelt(env!("CARGO_BIN_NAME"));
 
     let args: Vec<String> = env::args().skip(1).collect();
