@@ -1,7 +1,8 @@
 use std::io;
 
+use rurico::model_init::ModelInitError;
 use rurico::model_probe::ProbeStatus;
-use rurico::reranker::{Artifacts, Rerank, Reranker, RerankerInitError};
+use rurico::reranker::{Artifacts, Rerank, Reranker};
 
 use super::DegradedReason;
 
@@ -20,14 +21,14 @@ use super::DegradedReason;
 ///
 /// # Corrupt-model handling
 ///
-/// When the probe or `new_fn` reports `RerankerInitError::ModelCorrupt`, the
+/// When the probe or `new_fn` reports `ModelInitError::ModelCorrupt`, the
 /// loader deletes the artifact files so a subsequent call can re-download. If
 /// deletion itself fails, `on_delete_error` is invoked with the `io::Error` so
 /// the caller can log or surface it — this crate never calls tracing directly.
 pub fn try_load_reranker_with<CE>(
     cache_check: impl FnOnce() -> Result<Option<Artifacts>, CE>,
     on_delete_error: impl FnOnce(io::Error),
-    on_err: impl FnOnce(RerankerInitError),
+    on_err: impl FnOnce(ModelInitError),
 ) -> Result<Box<dyn Rerank>, DegradedReason> {
     try_load_reranker_with_fns(
         cache_check,
@@ -42,9 +43,9 @@ pub fn try_load_reranker_with<CE>(
 fn try_load_reranker_with_fns<A, CE, R>(
     cache_check: impl FnOnce() -> Result<Option<A>, CE>,
     on_delete_error: impl FnOnce(io::Error),
-    on_err: impl FnOnce(RerankerInitError),
-    probe_fn: impl FnOnce(&A) -> Result<ProbeStatus, RerankerInitError>,
-    new_fn: impl FnOnce(&A) -> Result<R, RerankerInitError>,
+    on_err: impl FnOnce(ModelInitError),
+    probe_fn: impl FnOnce(&A) -> Result<ProbeStatus, ModelInitError>,
+    new_fn: impl FnOnce(&A) -> Result<R, ModelInitError>,
     delete_fn: impl FnOnce(A) -> Result<(), io::Error>,
 ) -> Result<Box<dyn Rerank>, DegradedReason>
 where
@@ -58,7 +59,7 @@ where
     match probe_fn(&artifacts) {
         Ok(ProbeStatus::Available) => {}
         Ok(ProbeStatus::BackendUnavailable) => return Err(DegradedReason::BackendUnavailable),
-        Err(RerankerInitError::ModelCorrupt { .. }) => {
+        Err(ModelInitError::ModelCorrupt { .. }) => {
             if let Err(io_err) = delete_fn(artifacts) {
                 on_delete_error(io_err);
             }
@@ -71,7 +72,7 @@ where
     }
     match new_fn(&artifacts) {
         Ok(r) => Ok(Box::new(r) as Box<dyn Rerank>),
-        Err(RerankerInitError::ModelCorrupt { .. }) => {
+        Err(ModelInitError::ModelCorrupt { .. }) => {
             if let Err(io_err) = delete_fn(artifacts) {
                 on_delete_error(io_err);
             }
@@ -154,7 +155,12 @@ mod tests {
             cache_present(),
             |_| unreachable!("on_delete_error must not be called on non-corrupt probe error"),
             |e| captured.set(Some(e.to_string())),
-            |_| Err(RerankerInitError::Backend("probe failed".into())),
+            |_| {
+                Err(ModelInitError::Backend {
+                    message: "probe failed".into(),
+                    source: None,
+                })
+            },
             |_| unreachable!("new must not be called when probe fails"),
             |_| unreachable!("delete must not be called on non-corrupt probe error"),
         );
@@ -175,7 +181,12 @@ mod tests {
             |_| unreachable!("on_delete_error must not be called when probe succeeds"),
             |e| captured.set(Some(e.to_string())),
             |_| Ok(ProbeStatus::Available),
-            |_| Err(RerankerInitError::Backend("alloc failed".into())),
+            |_| {
+                Err(ModelInitError::Backend {
+                    message: "alloc failed".into(),
+                    source: None,
+                })
+            },
             |_| unreachable!("delete must not be called on new_fn failure"),
         );
         assert_eq!(result.err(), Some(DegradedReason::ProbeFailed));
@@ -197,7 +208,7 @@ mod tests {
             |_| on_delete_error_called.set(true),
             |_| on_err_called.set(true),
             |_| {
-                Err(RerankerInitError::ModelCorrupt {
+                Err(ModelInitError::ModelCorrupt {
                     reason: "bad weights".into(),
                 })
             },
@@ -229,7 +240,7 @@ mod tests {
             |e| captured.set(Some(e.to_string())),
             |_| on_err_called.set(true),
             |_| {
-                Err(RerankerInitError::ModelCorrupt {
+                Err(ModelInitError::ModelCorrupt {
                     reason: "bad weights".into(),
                 })
             },
@@ -271,7 +282,7 @@ mod tests {
             |_| on_err_called.set(true),
             |_| Ok(ProbeStatus::Available),
             |_| {
-                Err(RerankerInitError::ModelCorrupt {
+                Err(ModelInitError::ModelCorrupt {
                     reason: "bad weights".into(),
                 })
             },

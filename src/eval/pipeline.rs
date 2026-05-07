@@ -9,6 +9,7 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
+use bytemuck::cast_slice;
 use rurico::embed::{EMBEDDING_DIMS, Embed, EmbedError};
 use rurico::reranker::{Rerank, RerankerError};
 use rurico::retrieval::{
@@ -16,7 +17,7 @@ use rurico::retrieval::{
     WeightedRrf,
 };
 use rurico::storage::{
-    QueryNormalizationConfig, SanitizeError, ensure_sqlite_vec, f32_as_bytes, normalize_for_fts,
+    QueryNormalizationConfig, SanitizeError, ensure_sqlite_vec, normalize_for_fts,
     prepare_match_query,
 };
 use rusqlite::{Connection, params};
@@ -260,7 +261,7 @@ fn index_corpus<E: Embed>(
                 .iter()
                 .zip(&chunked_embedding.chunk_ids)
             {
-                insert_vec.execute(params![f32_as_bytes(chunk_vec), &doc.id, chunk_id])?;
+                insert_vec.execute(params![cast_slice::<f32, u8>(chunk_vec), &doc.id, chunk_id])?;
             }
         }
     }
@@ -379,7 +380,7 @@ fn retrieve_vec<E: Embed>(
     limit: usize,
 ) -> Result<Vec<Candidate>, PipelineError> {
     let embedding = embedder.embed_query(query)?;
-    let bytes = f32_as_bytes(&embedding);
+    let bytes = cast_slice::<f32, u8>(&embedding);
     let k_i64 = i64::try_from(limit).unwrap_or(i64::MAX);
     let mut stmt = conn.prepare_cached(
         "SELECT doc_id, chunk_id, distance FROM vec_docs WHERE embedding MATCH ? AND k = ?",

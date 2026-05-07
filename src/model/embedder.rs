@@ -1,7 +1,8 @@
 use std::io;
 use std::sync::Arc;
 
-use rurico::embed::{Artifacts, Embed, EmbedInitError, Embedder, ModelId, cached_artifacts};
+use rurico::embed::{Artifacts, Embed, Embedder, ModelId, cached_artifacts};
+use rurico::model_init::ModelInitError;
 use rurico::model_probe::ProbeStatus;
 
 pub use super::{DegradedReason, degraded_reason_user_note};
@@ -21,14 +22,14 @@ pub use super::{DegradedReason, degraded_reason_user_note};
 ///
 /// # Corrupt-model handling
 ///
-/// When the probe or `new_fn` reports `EmbedInitError::ModelCorrupt`, the loader
+/// When the probe or `new_fn` reports `ModelInitError::ModelCorrupt`, the loader
 /// deletes the artifact files so a subsequent call can re-download. If deletion
 /// itself fails, `on_delete_error` is invoked with the `io::Error` so the caller
 /// can log or surface it — this crate never calls tracing directly.
 pub fn try_load_embedder_with<CE>(
     cache_check: impl FnOnce() -> Result<Option<Artifacts>, CE>,
     on_delete_error: impl FnOnce(io::Error),
-    on_probe_err: impl FnOnce(EmbedInitError),
+    on_probe_err: impl FnOnce(ModelInitError),
 ) -> Result<Arc<dyn Embed>, DegradedReason> {
     try_load_embedder_with_fns(
         cache_check,
@@ -70,8 +71,8 @@ pub fn try_load_embedder_default_logging() -> Result<Arc<dyn Embed>, DegradedRea
 
 pub(super) fn try_load_embedder_default_logging_with_fns<A, E, CE>(
     cache_check: impl FnOnce() -> Result<Option<A>, CE>,
-    probe_fn: impl FnOnce(&A) -> Result<ProbeStatus, EmbedInitError>,
-    new_fn: impl FnOnce(&A) -> Result<E, EmbedInitError>,
+    probe_fn: impl FnOnce(&A) -> Result<ProbeStatus, ModelInitError>,
+    new_fn: impl FnOnce(&A) -> Result<E, ModelInitError>,
     delete_fn: impl FnOnce(A) -> Result<(), io::Error>,
 ) -> Result<Arc<dyn Embed>, DegradedReason>
 where
@@ -79,8 +80,8 @@ where
 {
     try_load_embedder_with_fns(
         cache_check,
-        |e| tracing::warn!(error = %e, "failed to delete corrupt model files"),
-        |e| tracing::warn!(error = %e, "embedder probe failed"),
+        |e| tracing::warn!(error = %e, model_kind = "embed", "failed to delete corrupt model files"),
+        |e| tracing::warn!(error = %e, model_kind = "embed", "embedder probe failed"),
         probe_fn,
         new_fn,
         delete_fn,
@@ -90,9 +91,9 @@ where
 pub(super) fn try_load_embedder_with_fns<A, E, CE>(
     cache_check: impl FnOnce() -> Result<Option<A>, CE>,
     on_delete_error: impl FnOnce(io::Error),
-    on_probe_err: impl FnOnce(EmbedInitError),
-    probe_fn: impl FnOnce(&A) -> Result<ProbeStatus, EmbedInitError>,
-    new_fn: impl FnOnce(&A) -> Result<E, EmbedInitError>,
+    on_probe_err: impl FnOnce(ModelInitError),
+    probe_fn: impl FnOnce(&A) -> Result<ProbeStatus, ModelInitError>,
+    new_fn: impl FnOnce(&A) -> Result<E, ModelInitError>,
     delete_fn: impl FnOnce(A) -> Result<(), io::Error>,
 ) -> Result<Arc<dyn Embed>, DegradedReason>
 where
@@ -106,7 +107,7 @@ where
     match probe_fn(&artifacts) {
         Ok(ProbeStatus::Available) => {}
         Ok(ProbeStatus::BackendUnavailable) => return Err(DegradedReason::BackendUnavailable),
-        Err(EmbedInitError::ModelCorrupt { .. }) => {
+        Err(ModelInitError::ModelCorrupt { .. }) => {
             if let Err(io_err) = delete_fn(artifacts) {
                 on_delete_error(io_err);
             }
@@ -119,7 +120,7 @@ where
     }
     match new_fn(&artifacts) {
         Ok(e) => Ok(Arc::new(e) as Arc<dyn Embed>),
-        Err(EmbedInitError::ModelCorrupt { .. }) => {
+        Err(ModelInitError::ModelCorrupt { .. }) => {
             if let Err(io_err) = delete_fn(artifacts) {
                 on_delete_error(io_err);
             }
@@ -196,7 +197,7 @@ mod tests {
             |_| on_delete_error_called.set(true),
             |_| unreachable!("on_probe_err must not be called on ModelCorrupt"),
             |_| {
-                Err(EmbedInitError::ModelCorrupt {
+                Err(ModelInitError::ModelCorrupt {
                     reason: "bad weights".into(),
                 })
             },
@@ -223,7 +224,7 @@ mod tests {
             |e| captured.set(Some(e.to_string())),
             |_| unreachable!("on_probe_err must not be called on ModelCorrupt"),
             |_| {
-                Err(EmbedInitError::ModelCorrupt {
+                Err(ModelInitError::ModelCorrupt {
                     reason: "bad weights".into(),
                 })
             },
@@ -260,7 +261,12 @@ mod tests {
             cache_present(),
             |_| unreachable!("on_delete_error must not be called"),
             |e| captured.set(Some(e.to_string())),
-            |_| Err(EmbedInitError::Backend("spawn failed".into())),
+            |_| {
+                Err(ModelInitError::Backend {
+                    message: "spawn failed".into(),
+                    source: None,
+                })
+            },
             |_| unreachable!("new must not be called when probe fails"),
             |_| unreachable!("delete must not be called on non-corrupt probe error"),
         );
@@ -292,7 +298,12 @@ mod tests {
             |_| {},
             |e| captured.set(Some(e.to_string())),
             |_| Ok(ProbeStatus::Available),
-            |_| Err(EmbedInitError::Backend("alloc failed".into())),
+            |_| {
+                Err(ModelInitError::Backend {
+                    message: "alloc failed".into(),
+                    source: None,
+                })
+            },
             |_| unreachable!("delete must not be called on new_fn failure"),
         );
         assert_eq!(result.err(), Some(DegradedReason::ProbeFailed));
@@ -314,7 +325,7 @@ mod tests {
             |_| unreachable!("on_probe_err must not be called when new_fn reports ModelCorrupt"),
             |_| Ok(ProbeStatus::Available),
             |_| {
-                Err(EmbedInitError::ModelCorrupt {
+                Err(ModelInitError::ModelCorrupt {
                     reason: "bad weights".into(),
                 })
             },
