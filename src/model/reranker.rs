@@ -1,6 +1,7 @@
 use std::io;
 
-use rurico::reranker::{Artifacts, ProbeStatus, Rerank, Reranker, RerankerInitError};
+use rurico::model_probe::ProbeStatus;
+use rurico::reranker::{Artifacts, Rerank, Reranker, RerankerInitError};
 
 use super::DegradedReason;
 

@@ -6,9 +6,8 @@ use std::error::Error;
 use std::fmt;
 use std::io;
 
-use rurico::embed::{
-    Artifacts, Embed, EmbedInitError, Embedder, ModelId, ProbeStatus, download_model,
-};
+use rurico::embed::{Artifacts, Embed, EmbedInitError, Embedder, ModelId, download_model};
+use rurico::model_probe::ProbeStatus;
 
 use self::embedder::try_load_embedder_with_fns;
 use crate::cli::with_spinner;
@@ -210,7 +209,7 @@ impl Error for ModelDownloadError {}
 ///
 /// # Prerequisites
 ///
-/// The calling binary must invoke `rurico::model_probe::handle_probe_if_needed()`
+/// The calling binary must invoke `rurico::handle_probe_if_needed()`
 /// at the very start of `main()`. Without it, the post-download probe returns
 /// [`ModelDownloadError::ProbeFailed`] even when the download succeeds.
 ///

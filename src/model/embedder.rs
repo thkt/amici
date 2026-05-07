@@ -1,9 +1,8 @@
 use std::io;
 use std::sync::Arc;
 
-use rurico::embed::{
-    Artifacts, Embed, EmbedInitError, Embedder, ModelId, ProbeStatus, cached_artifacts,
-};
+use rurico::embed::{Artifacts, Embed, EmbedInitError, Embedder, ModelId, cached_artifacts};
+use rurico::model_probe::ProbeStatus;
 
 pub use super::{DegradedReason, degraded_reason_user_note};
 
