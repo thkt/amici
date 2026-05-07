@@ -6,9 +6,9 @@ use std::error::Error;
 use std::fmt;
 use std::io;
 
-use rurico::embed::{
-    Artifacts, Embed, EmbedInitError, Embedder, ModelId, ProbeStatus, download_model,
-};
+use rurico::embed::{Artifacts, Embed, Embedder, ModelId, download_model};
+use rurico::model_init::ModelInitError;
+use rurico::model_probe::ProbeStatus;
 
 use self::embedder::try_load_embedder_with_fns;
 use crate::cli::with_spinner;
@@ -210,7 +210,7 @@ impl Error for ModelDownloadError {}
 ///
 /// # Prerequisites
 ///
-/// The calling binary must invoke `rurico::model_probe::handle_probe_if_needed()`
+/// The calling binary must invoke `rurico::handle_probe_if_needed()`
 /// at the very start of `main()`. Without it, the post-download probe returns
 /// [`ModelDownloadError::ProbeFailed`] even when the download succeeds.
 ///
@@ -249,8 +249,8 @@ pub fn download_and_verify_model() -> Result<(), ModelDownloadError> {
 fn try_download_and_verify_with_fns<A, E, DE>(
     download_fn: impl FnOnce() -> Result<A, DE>,
     on_delete_error: impl FnOnce(io::Error),
-    probe_fn: impl FnOnce(&A) -> Result<ProbeStatus, EmbedInitError>,
-    new_fn: impl FnOnce(&A) -> Result<E, EmbedInitError>,
+    probe_fn: impl FnOnce(&A) -> Result<ProbeStatus, ModelInitError>,
+    new_fn: impl FnOnce(&A) -> Result<E, ModelInitError>,
     delete_fn: impl FnOnce(A) -> Result<(), io::Error>,
     on_download_complete: impl FnOnce(),
 ) -> Result<(), ModelDownloadError>
@@ -415,7 +415,12 @@ mod tests {
         let result = try_download_and_verify_with_fns::<_, MockEmbedder, String>(
             || Ok::<_, String>(()),
             |_| unreachable!("on_delete_error must not fire on non-corrupt probe error"),
-            |_| Err(EmbedInitError::Backend("backend down".into())),
+            |_| {
+                Err(ModelInitError::Backend {
+                    message: "backend down".into(),
+                    source: None,
+                })
+            },
             |_| unreachable!("new must not be called when probe fails"),
             |_| unreachable!("delete must not be called on non-corrupt probe error"),
             || {},
@@ -455,7 +460,12 @@ mod tests {
             || Ok::<_, String>(()),
             |_| {},
             |_| Ok(ProbeStatus::Available),
-            |_| Err(EmbedInitError::Backend("alloc failed".into())),
+            |_| {
+                Err(ModelInitError::Backend {
+                    message: "alloc failed".into(),
+                    source: None,
+                })
+            },
             |_| unreachable!("delete must not be called on non-corrupt new_fn failure"),
             || {},
         );
