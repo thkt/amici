@@ -50,6 +50,14 @@ eval-oracle:
       capture-oracle aggregation=identity \
       output=tests/fixtures/eval/oracle_baseline.json
 
+# Compare committed baseline.json with oracle_baseline.json (Issue #52)
+# Emits markdown gap report + AC 4 gate (exit 1 on per-category recall regression).
+# Read-only — no MLX required, runs on any platform.
+eval-oracle-gap:
+    cargo run --bin eval_harness --features eval-harness --release -- \
+      oracle-gap baseline=tests/fixtures/eval/baseline.json \
+      oracle=tests/fixtures/eval/oracle_baseline.json
+
 # Capture a variant baseline to /tmp (agg = identity / max-chunk / dedupe / topk-average)
 eval-baseline-variant agg:
     cargo run --bin eval_harness --features eval-harness --release -- \
