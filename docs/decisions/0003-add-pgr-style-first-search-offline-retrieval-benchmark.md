@@ -74,4 +74,9 @@ Option 1 を採用する。
 - ADR 0002: Search Quality Evaluation Methodology
 - Issue #61: `Hit@1` / `Hit@3` メトリクスの追加
 - Issue #62: first-search replay モードの追加
-- 関連 (recall): [recall#80](https://github.com/thkt/recall/issues/80) — README の ranking 記述と実装の整合化
+
+## Downstream consumers (this ADR を前提として動く後続)
+
+- [yomu#163](https://github.com/thkt/yomu/issues/163) — definitions-first / src-tier ranking の効果測定 (P1、本 ADR 完了後に着手)
+- [sae#107](https://github.com/thkt/sae/issues/107) — sae の hybrid retrieval quality を amici で benchmark 化 (P3、本 ADR 完了後に着手)
+- [recall#80](https://github.com/thkt/recall/issues/80) — recall README の ranking 記述と実装の整合化 (P2、独立タスク)
