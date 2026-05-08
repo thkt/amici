@@ -17,6 +17,12 @@ use std::collections::BTreeMap;
 use crate::eval::baseline::{BaselineKind, BaselineSnapshot};
 use crate::eval::metrics::MetricResult;
 
+/// Prefix on every metric name that the AC 4 gate covers.
+///
+/// Single source of truth so a typo (`"recall_"`) cannot silently
+/// disable the gate.
+const RECALL_METRIC_PREFIX: &str = "recall@";
+
 /// Errors surfaced by [`compute_gap`].
 #[derive(thiserror::Error, Debug)]
 #[non_exhaustive]
@@ -73,11 +79,11 @@ pub struct MetricGap {
 /// doc at rank 0.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Ac4Violation {
-    /// Category label that triggered the violation (or `"<global>"` when
-    /// the global metric itself regressed).
+    /// Per-category label that triggered the violation. The global
+    /// aggregate is reported in [`OracleGap::global`] but not gated.
     pub category: String,
     /// Metric label that regressed (e.g. `recall@5`).
-    pub metric_name: String,
+    pub name: String,
     /// `k` cutoff carried by the metric.
     pub k: usize,
     /// Forward point estimate.
@@ -186,10 +192,10 @@ fn detect_ac4_violations(per_category: &BTreeMap<String, Vec<MetricGap>>) -> Vec
     let mut violations = Vec::new();
     for (category, gaps) in per_category {
         for gap in gaps {
-            if gap.name.starts_with("recall@") && gap.diff < 0.0 {
+            if gap.name.starts_with(RECALL_METRIC_PREFIX) && gap.diff < 0.0 {
                 violations.push(Ac4Violation {
                     category: category.clone(),
-                    metric_name: gap.name.clone(),
+                    name: gap.name.clone(),
                     k: gap.k,
                     baseline_point: gap.baseline_point,
                     oracle_point: gap.oracle_point,
@@ -222,7 +228,7 @@ pub fn format_markdown(gap: &OracleGap) -> String {
                 "- `{category}` `{name}`: oracle {oracle:.4} < baseline {baseline:.4} \
                  (diff {diff:+.4})\n",
                 category = v.category,
-                name = v.metric_name,
+                name = v.name,
                 oracle = v.oracle_point,
                 baseline = v.baseline_point,
                 diff = v.oracle_point - v.baseline_point,

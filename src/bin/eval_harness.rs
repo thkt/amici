@@ -991,17 +991,10 @@ fn run_verify_baseline(kvs: &HashMap<String, String>) -> ExitCode {
     };
     // Read and parse the committed baseline before paying the multi-second
     // model-load cost — a malformed file fails fast.
-    let json = match fs::read_to_string(&baseline_path) {
+    let committed: BaselineSnapshot = match read_snapshot(&baseline_path) {
         Ok(s) => s,
-        Err(e) => {
-            eprintln!("verify-baseline: read failed: {e}");
-            return ExitCode::from(EXIT_INFRA);
-        }
-    };
-    let committed: BaselineSnapshot = match serde_json::from_str(&json) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("verify-baseline: parse failed: {e}");
+        Err(msg) => {
+            eprintln!("verify-baseline: {msg}");
             return ExitCode::from(EXIT_INFRA);
         }
     };
@@ -1309,17 +1302,10 @@ fn run_compare_baselines(kvs: &HashMap<String, String>) -> ExitCode {
     }
     let mut snapshots: Vec<(String, BaselineSnapshot)> = Vec::with_capacity(paths.len());
     for path in &paths {
-        let text = match fs::read_to_string(path) {
-            Ok(t) => t,
-            Err(e) => {
-                eprintln!("compare-baselines: failed to read {path}: {e}");
-                return ExitCode::from(EXIT_INFRA);
-            }
-        };
-        let snapshot: BaselineSnapshot = match serde_json::from_str(&text) {
+        let snapshot: BaselineSnapshot = match read_snapshot(Path::new(path)) {
             Ok(s) => s,
-            Err(e) => {
-                eprintln!("compare-baselines: failed to parse {path}: {e}");
+            Err(msg) => {
+                eprintln!("compare-baselines: {msg}");
                 return ExitCode::from(EXIT_INFRA);
             }
         };
@@ -1341,59 +1327,64 @@ fn run_compare_baselines(kvs: &HashMap<String, String>) -> ExitCode {
 /// stdout, and exit `EXIT_REGRESSION` if AC 4 is violated (any category
 /// where `oracle.recall@k < baseline.recall@k`).
 fn run_oracle_gap(kvs: &HashMap<String, String>) -> ExitCode {
-    let Some(baseline_raw) = kvs.get("baseline") else {
-        eprintln!("oracle-gap: baseline= argument required");
-        return ExitCode::from(EXIT_USAGE);
-    };
-    let Some(oracle_raw) = kvs.get("oracle") else {
-        eprintln!("oracle-gap: oracle= argument required");
-        return ExitCode::from(EXIT_USAGE);
-    };
-    let baseline_path = match validate_baseline_path(baseline_raw) {
-        Ok(p) => p,
-        Err(msg) => {
-            eprintln!("oracle-gap: baseline= {msg}");
-            return ExitCode::from(EXIT_USAGE);
+    match run_oracle_gap_inner(kvs) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err((code, msg)) => {
+            eprintln!("oracle-gap: {msg}");
+            ExitCode::from(code)
         }
-    };
-    let oracle_path = match validate_baseline_path(oracle_raw) {
-        Ok(p) => p,
-        Err(msg) => {
-            eprintln!("oracle-gap: oracle= {msg}");
-            return ExitCode::from(EXIT_USAGE);
-        }
-    };
-    let baseline_snapshot = match read_snapshot(&baseline_path) {
-        Ok(s) => s,
-        Err(msg) => {
-            eprintln!("oracle-gap: baseline= {msg}");
-            return ExitCode::from(EXIT_INFRA);
-        }
-    };
-    let oracle_snapshot = match read_snapshot(&oracle_path) {
-        Ok(s) => s,
-        Err(msg) => {
-            eprintln!("oracle-gap: oracle= {msg}");
-            return ExitCode::from(EXIT_INFRA);
-        }
-    };
-    let gap = match compute_gap(&baseline_snapshot, &oracle_snapshot) {
-        Ok(g) => g,
-        Err(e) => {
-            eprintln!("oracle-gap: {e}");
-            return ExitCode::from(EXIT_INFRA);
-        }
-    };
+    }
+}
+
+/// Happy-path body for [`run_oracle_gap`]. Each error carries its exit
+/// code so the outer wrapper never has to map back from the message.
+fn run_oracle_gap_inner(kvs: &HashMap<String, String>) -> Result<(), (u8, String)> {
+    let baseline_raw = kvs
+        .get("baseline")
+        .ok_or((EXIT_USAGE, "baseline= argument required".to_owned()))?;
+    let oracle_raw = kvs
+        .get("oracle")
+        .ok_or((EXIT_USAGE, "oracle= argument required".to_owned()))?;
+    let baseline_path =
+        validate_baseline_path(baseline_raw).map_err(|m| (EXIT_USAGE, format!("baseline= {m}")))?;
+    let oracle_path =
+        validate_baseline_path(oracle_raw).map_err(|m| (EXIT_USAGE, format!("oracle= {m}")))?;
+    let baseline_snapshot =
+        read_snapshot(&baseline_path).map_err(|m| (EXIT_INFRA, format!("baseline= {m}")))?;
+    let oracle_snapshot =
+        read_snapshot(&oracle_path).map_err(|m| (EXIT_INFRA, format!("oracle= {m}")))?;
+    enforce_current_schema(&baseline_snapshot, "baseline")?;
+    enforce_current_schema(&oracle_snapshot, "oracle")?;
+    let gap = compute_gap(&baseline_snapshot, &oracle_snapshot)
+        .map_err(|e| (EXIT_INFRA, format!("{e}")))?;
     println!("{}", format_markdown(&gap));
     if gap.ac4_violations.is_empty() {
-        ExitCode::SUCCESS
+        Ok(())
     } else {
-        eprintln!(
-            "oracle-gap: AC 4 violated by {} per-category recall regression(s)",
-            gap.ac4_violations.len()
-        );
-        ExitCode::from(EXIT_REGRESSION)
+        Err((
+            EXIT_REGRESSION,
+            format!(
+                "AC 4 violated by {} per-category recall regression(s)",
+                gap.ac4_violations.len()
+            ),
+        ))
     }
+}
+
+/// Reject snapshots whose `schema_version` does not match the current
+/// harness, so a stale committed file cannot drift past a schema bump.
+fn enforce_current_schema(snapshot: &BaselineSnapshot, label: &str) -> Result<(), (u8, String)> {
+    if snapshot.schema_version == BASELINE_SCHEMA_VERSION {
+        return Ok(());
+    }
+    Err((
+        EXIT_INFRA,
+        format!(
+            "{label} schema_version {:?} does not match harness {:?}; \
+             regenerate the snapshot before comparing",
+            snapshot.schema_version, BASELINE_SCHEMA_VERSION
+        ),
+    ))
 }
 
 /// Read a `BaselineSnapshot` from `path` as JSON. Centralised so

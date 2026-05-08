@@ -176,7 +176,7 @@ fn detect_ac4_violations_flags_recall_regression_per_category() {
         violations,
         vec![Ac4Violation {
             category: "troubleshooting".to_owned(),
-            metric_name: "recall@5".to_owned(),
+            name: "recall@5".to_owned(),
             k: 5,
             baseline_point: 0.7,
             oracle_point: 0.65,
