@@ -12,7 +12,7 @@
 //! intentionally-omitted fields are documented in
 //! `docs/decisions/0004-annotation-framework.md`.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
@@ -70,8 +70,10 @@ pub struct Entry {
     pub text: String,
     /// One of the seven semantic category labels (FR-006 of ADR-0002).
     pub category: String,
-    /// Maps `doc_id` to graded relevance in `{0, 1, 2, 3}`.
-    pub relevance_map: HashMap<String, u8>,
+    /// Maps `doc_id` to graded relevance in `{0, 1, 2, 3}`. `BTreeMap`
+    /// guarantees deterministic JSON key order so an unchanged
+    /// [`Session`] re-emits byte-identical output across runs.
+    pub relevance_map: BTreeMap<String, u8>,
     /// Free-form rationale note for the relevance judgment. Distinct
     /// from [`crate::eval::fixture::EvalQuery::annotation`] to avoid
     /// identifier collision in shared `use` scope (FR-005).
@@ -126,9 +128,7 @@ pub enum AnnotationError {
     /// Annotation session contains zero entries.
     #[error("annotation session is empty")]
     EmptySession,
-    /// JSON serialisation / deserialisation failure. Wraps the
-    /// underlying `serde_json::Error` and preserves the source chain
-    /// via `#[from]`.
+    /// JSON serialisation / deserialisation failure.
     #[error("annotation serialise error: {0}")]
     Serialise(#[from] serde_json::Error),
 }

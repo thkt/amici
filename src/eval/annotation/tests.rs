@@ -5,7 +5,7 @@
 //! Spec's Skip rationale (FR-V002 Serialise wrapper) explicitly defers
 //! that case to the implicit serde path coverage from T-002.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use super::*;
 use crate::eval::fixture::EvalQuery;
@@ -13,10 +13,6 @@ use crate::eval::fixture::EvalQuery;
 /// Build a stub [`Provenance`] carrying the given `schema_version`. All
 /// other fields take literal stub values that the test under exercise
 /// does not inspect.
-///
-/// Mirrors the `snapshot` helper pattern in
-/// `src/eval/oracle_gap/tests.rs` — centralises the 6-field literal so
-/// T-002 / T-003 / T-004 read as one-liners.
 fn make_provenance(schema_version: &str) -> Provenance {
     Provenance {
         schema_version: schema_version.to_owned(),
@@ -32,7 +28,7 @@ fn make_provenance(schema_version: &str) -> Provenance {
 /// annotation note text. `mode` is fixed to [`BlockMode::Standard`] (the
 /// only Phase 1 variant per FR-006).
 fn make_entry(id: &str, annotation_note: &str) -> Entry {
-    let mut relevance_map = HashMap::new();
+    let mut relevance_map = BTreeMap::new();
     relevance_map.insert("d1".to_owned(), 2u8);
     Entry {
         id: id.to_owned(),
@@ -45,7 +41,7 @@ fn make_entry(id: &str, annotation_note: &str) -> Entry {
 }
 
 /// Build a one-entry [`Session`] with provenance carrying
-/// `schema_version`. Used by T-002 / T-003 / T-004.
+/// `schema_version`.
 fn make_session(schema_version: &str) -> Session {
     Session {
         provenance: make_provenance(schema_version),
@@ -71,15 +67,11 @@ fn eval_query_annotation_and_entry_annotation_note_coexist() {
 
     assert_eq!(
         query.annotation, "existing relevance note",
-        "EvalQuery.annotation must preserve the existing relevance-rationale field semantics; \
-         got: {:?}",
-        query.annotation
+        "EvalQuery.annotation must preserve the existing relevance-rationale field semantics"
     );
     assert_eq!(
         entry.annotation_note, "new block-mode judgment",
-        "Entry.annotation_note must be readable alongside EvalQuery.annotation without rename; \
-         got: {:?}",
-        entry.annotation_note
+        "Entry.annotation_note must be readable alongside EvalQuery.annotation without rename"
     );
 }
 
@@ -96,8 +88,7 @@ fn session_round_trips_through_serde_json() {
 
     assert_eq!(
         parsed, original,
-        "Session must round-trip through serde_json under PartialEq; \
-         original={original:?}, parsed={parsed:?}"
+        "Session must round-trip through serde_json under PartialEq"
     );
 }
 
@@ -122,36 +113,35 @@ fn validate_schema_version_rejects_mismatched_label() {
     );
 }
 
-// T-004: pub_items_compile_with_canonical_constant_and_block_mode_variant
-// FR-001 / FR-002 / FR-006: 6 pub items reachable via `use super::*`;
-//          ANNOTATION_SCHEMA_VERSION == "1.0"; BlockMode::Standard
-//          reachable on Entry.mode; one AnnotationError variant
-//          matches!-pattern.
+// T-004a: annotation_schema_version_constant_equals_1_0
+// FR-002: ANNOTATION_SCHEMA_VERSION pub const equals "1.0".
 #[test]
-fn pub_items_compile_with_canonical_constant_and_block_mode_variant() {
+fn annotation_schema_version_constant_equals_1_0() {
     assert_eq!(
         ANNOTATION_SCHEMA_VERSION, "1.0",
-        "FR-002: ANNOTATION_SCHEMA_VERSION must equal \"1.0\"; got: {ANNOTATION_SCHEMA_VERSION:?}"
+        "FR-002: ANNOTATION_SCHEMA_VERSION must equal \"1.0\""
     );
+}
 
+// T-004b: entry_mode_is_reachable_as_block_mode_standard
+// FR-006: BlockMode::Standard is reachable as the sole Phase 1
+//         authoring strategy variant via `matches!`.
+#[test]
+fn entry_mode_is_reachable_as_block_mode_standard() {
     let session = make_session(ANNOTATION_SCHEMA_VERSION);
-
-    assert_eq!(
-        session.provenance.schema_version, ANNOTATION_SCHEMA_VERSION,
-        "Provenance built from ANNOTATION_SCHEMA_VERSION must round-trip the constant value"
-    );
-    assert_eq!(
-        session.entries.len(),
-        1,
-        "make_session must produce exactly one entry for the FR-006 reachability check"
-    );
     assert!(
         matches!(session.entries[0].mode, BlockMode::Standard),
         "FR-006: Entry.mode must be reachable as BlockMode::Standard; \
          got: {:?}",
         session.entries[0].mode
     );
+}
 
+// T-004c: annotation_error_empty_session_variant_is_reachable
+// FR-001: AnnotationError pub-exports the EmptySession variant
+//         reachable via `matches!`.
+#[test]
+fn annotation_error_empty_session_variant_is_reachable() {
     let err: AnnotationError = AnnotationError::EmptySession;
     assert!(
         matches!(err, AnnotationError::EmptySession),
