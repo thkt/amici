@@ -11,6 +11,7 @@
 //! eval_harness capture-baseline output=<path>
 //! eval_harness capture-reverse-baseline output=<path>
 //! eval_harness capture-oracle output=<path>
+//! eval_harness oracle-gap baseline=<path> oracle=<path>
 //! eval_harness verify-baseline baseline=<path>
 //! ```
 //!
@@ -38,6 +39,7 @@ use amici::eval::fixture::{
     EvalDocument, EvalQuery, load_documents, load_known_answers, load_queries,
 };
 use amici::eval::metrics::{MetricResult, bootstrap_ci, mrr_at_k, ndcg_at_k, recall_at_k};
+use amici::eval::oracle_gap::{compute_gap, format_markdown};
 use amici::eval::oracle_pipeline::{OracleError, evaluate_oracle};
 use amici::eval::pipeline::{PipelineConfig, PipelineError, QueryResult, evaluate as run_pipeline};
 use rurico::embed::Embed;
@@ -491,18 +493,32 @@ impl MetricSpec {
     }
 }
 
+/// Modes that load MLX models and would crash under the Codex seatbelt
+/// sandbox. `exit_if_seatbelt` fires for these only — read-only modes
+/// like `oracle-gap` and `compare-baselines` parse committed JSON and
+/// have no MLX dependency, so they should run inside the sandbox.
+const MLX_DEPENDENT_MODES: &[&str] = &[
+    "evaluate",
+    "capture-baseline",
+    "capture-reverse-baseline",
+    "capture-oracle",
+    "verify-baseline",
+];
+
 fn main() -> ExitCode {
     rurico::handle_probe_if_needed();
-    exit_if_seatbelt(env!("CARGO_BIN_NAME"));
 
     let args: Vec<String> = env::args().skip(1).collect();
     let Some(mode) = args.first() else {
         eprintln!(
             "usage: eval_harness <evaluate|capture-baseline|capture-reverse-baseline|\
-             capture-oracle|verify-baseline|compare-baselines> [key=value...]"
+             capture-oracle|oracle-gap|verify-baseline|compare-baselines> [key=value...]"
         );
         return ExitCode::from(EXIT_USAGE);
     };
+    if MLX_DEPENDENT_MODES.contains(&mode.as_str()) {
+        exit_if_seatbelt(env!("CARGO_BIN_NAME"));
+    }
     let kvs: HashMap<String, String> = args[1..]
         .iter()
         .filter_map(|s| s.split_once('=').map(|(k, v)| (k.to_owned(), v.to_owned())))
@@ -513,6 +529,7 @@ fn main() -> ExitCode {
         "capture-baseline" => run_capture_baseline(&kvs),
         "capture-reverse-baseline" => run_capture_reverse_baseline(&kvs),
         "capture-oracle" => run_capture_oracle(&kvs),
+        "oracle-gap" => run_oracle_gap(&kvs),
         "verify-baseline" => run_verify_baseline(&kvs),
         "compare-baselines" => run_compare_baselines(&kvs),
         other => {
@@ -988,17 +1005,10 @@ fn run_verify_baseline(kvs: &HashMap<String, String>) -> ExitCode {
     };
     // Read and parse the committed baseline before paying the multi-second
     // model-load cost — a malformed file fails fast.
-    let json = match fs::read_to_string(&baseline_path) {
+    let committed: BaselineSnapshot = match read_snapshot(&baseline_path) {
         Ok(s) => s,
-        Err(e) => {
-            eprintln!("verify-baseline: read failed: {e}");
-            return ExitCode::from(EXIT_INFRA);
-        }
-    };
-    let committed: BaselineSnapshot = match serde_json::from_str(&json) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("verify-baseline: parse failed: {e}");
+        Err(msg) => {
+            eprintln!("verify-baseline: {msg}");
             return ExitCode::from(EXIT_INFRA);
         }
     };
@@ -1306,17 +1316,10 @@ fn run_compare_baselines(kvs: &HashMap<String, String>) -> ExitCode {
     }
     let mut snapshots: Vec<(String, BaselineSnapshot)> = Vec::with_capacity(paths.len());
     for path in &paths {
-        let text = match fs::read_to_string(path) {
-            Ok(t) => t,
-            Err(e) => {
-                eprintln!("compare-baselines: failed to read {path}: {e}");
-                return ExitCode::from(EXIT_INFRA);
-            }
-        };
-        let snapshot: BaselineSnapshot = match serde_json::from_str(&text) {
+        let snapshot: BaselineSnapshot = match read_snapshot(Path::new(path)) {
             Ok(s) => s,
-            Err(e) => {
-                eprintln!("compare-baselines: failed to parse {path}: {e}");
+            Err(msg) => {
+                eprintln!("compare-baselines: {msg}");
                 return ExitCode::from(EXIT_INFRA);
             }
         };
@@ -1331,6 +1334,78 @@ fn run_compare_baselines(kvs: &HashMap<String, String>) -> ExitCode {
     }
     print_comparison_table(&snapshots);
     ExitCode::SUCCESS
+}
+
+/// `oracle-gap baseline=<path> oracle=<path>` — read a Forward baseline
+/// and an Oracle baseline (Issue #52), emit a markdown gap report on
+/// stdout, and exit `EXIT_REGRESSION` if AC 4 is violated (any category
+/// where `oracle.recall@k < baseline.recall@k`).
+fn run_oracle_gap(kvs: &HashMap<String, String>) -> ExitCode {
+    match run_oracle_gap_inner(kvs) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err((code, msg)) => {
+            eprintln!("oracle-gap: {msg}");
+            ExitCode::from(code)
+        }
+    }
+}
+
+/// Happy-path body for [`run_oracle_gap`]. Each error carries its exit
+/// code so the outer wrapper never has to map back from the message.
+fn run_oracle_gap_inner(kvs: &HashMap<String, String>) -> Result<(), (u8, String)> {
+    let baseline_raw = kvs
+        .get("baseline")
+        .ok_or((EXIT_USAGE, "baseline= argument required".to_owned()))?;
+    let oracle_raw = kvs
+        .get("oracle")
+        .ok_or((EXIT_USAGE, "oracle= argument required".to_owned()))?;
+    let baseline_path =
+        validate_baseline_path(baseline_raw).map_err(|m| (EXIT_USAGE, format!("baseline= {m}")))?;
+    let oracle_path =
+        validate_baseline_path(oracle_raw).map_err(|m| (EXIT_USAGE, format!("oracle= {m}")))?;
+    let baseline_snapshot =
+        read_snapshot(&baseline_path).map_err(|m| (EXIT_INFRA, format!("baseline= {m}")))?;
+    let oracle_snapshot =
+        read_snapshot(&oracle_path).map_err(|m| (EXIT_INFRA, format!("oracle= {m}")))?;
+    enforce_current_schema(&baseline_snapshot, "baseline")?;
+    enforce_current_schema(&oracle_snapshot, "oracle")?;
+    let gap = compute_gap(&baseline_snapshot, &oracle_snapshot)
+        .map_err(|e| (EXIT_INFRA, format!("{e}")))?;
+    println!("{}", format_markdown(&gap));
+    if gap.ac4_violations.is_empty() {
+        Ok(())
+    } else {
+        Err((
+            EXIT_REGRESSION,
+            format!(
+                "AC 4 violated by {} per-category recall regression(s)",
+                gap.ac4_violations.len()
+            ),
+        ))
+    }
+}
+
+/// Reject snapshots whose `schema_version` does not match the current
+/// harness, so a stale committed file cannot drift past a schema bump.
+fn enforce_current_schema(snapshot: &BaselineSnapshot, label: &str) -> Result<(), (u8, String)> {
+    if snapshot.schema_version == BASELINE_SCHEMA_VERSION {
+        return Ok(());
+    }
+    Err((
+        EXIT_INFRA,
+        format!(
+            "{label} schema_version {:?} does not match harness {:?}; \
+             regenerate the snapshot before comparing",
+            snapshot.schema_version, BASELINE_SCHEMA_VERSION
+        ),
+    ))
+}
+
+/// Read a `BaselineSnapshot` from `path` as JSON. Centralised so
+/// `oracle-gap` reads both files through the same parse/error path.
+fn read_snapshot(path: &Path) -> Result<BaselineSnapshot, String> {
+    let text = fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    serde_json::from_str(&text).map_err(|e| format!("parse {}: {e}", path.display()))
 }
 
 /// Format `snapshots` as a markdown comparison table on stdout.

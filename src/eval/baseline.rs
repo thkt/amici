@@ -36,7 +36,13 @@ pub const UNINFORMATIVE_HALF_WIDTH: f64 = 0.10;
 ///   baseline.json files would surface as confusing per-metric drift
 ///   under the new fusion; the version bump turns that into a clean
 ///   "regenerate the baseline before verifying" exit instead.
-pub const BASELINE_SCHEMA_VERSION: &str = "1.1";
+/// - `1.2`: Oracle baseline kind (Issue #52). [`BaselineKind`] gained an
+///   `Oracle` variant; older harnesses cannot deserialise an
+///   `oracle_baseline.json` (variant unknown to their enum), but
+///   Forward and Reverse files round-trip unchanged. The bump lets
+///   `oracle-gap` refuse to compare snapshots produced under different
+///   semantic versions.
+pub const BASELINE_SCHEMA_VERSION: &str = "1.2";
 
 /// Discriminator distinguishing forward (`capture-baseline`) from reverse
 /// (`capture-reverse-baseline`) and oracle (`capture-oracle`) baseline files.
