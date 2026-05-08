@@ -198,6 +198,107 @@ fn t017_capture_baseline_writes_required_fields() {
     );
 }
 
+// T-052-001: t052_001_identity_oracle_yields_perfect_metrics
+// Issue #52 AC 5: oracle pipeline against the identity known-answer fixture
+// must keep `recall@1 == 1.0` and `ndcg@10 == 1.0`. Failure here means the
+// OracleMerge wiring or evaluate_oracle flow regressed past the wiring
+// guarantees of the identity fixture.
+#[test]
+#[ignore] // requires ruri-v3-310m cached + MLX (Apple Silicon)
+fn t052_001_identity_oracle_yields_perfect_metrics() {
+    let output = Command::new(env!("CARGO_BIN_EXE_eval_harness"))
+        .args(["evaluate", "kind=identity_oracle"])
+        .output()
+        .expect("spawn eval_harness evaluate kind=identity_oracle");
+    assert_smoke_success(&output);
+
+    let recall_at_1 = parse_metric_field("T-052-001", &output, "recall_at_1");
+    let ndcg_at_10 = parse_metric_field("T-052-001", &output, "ndcg_at_10");
+
+    assert!(
+        (recall_at_1 - 1.0).abs() < f64::EPSILON,
+        "[T-052-001] AC 5 identity_oracle: recall_at_1 must be 1.0, got {recall_at_1}"
+    );
+    assert!(
+        (ndcg_at_10 - 1.0).abs() < f64::EPSILON,
+        "[T-052-001] AC 5 identity_oracle: ndcg_at_10 must be 1.0, got {ndcg_at_10}"
+    );
+}
+
+// T-052-002: t052_002_single_doc_oracle_yields_perfect_metrics
+// Issue #52 AC 5: oracle pipeline against the single_doc known-answer
+// fixture must keep `recall@1 == 1.0` and `mrr == 1.0`.
+#[test]
+#[ignore] // requires ruri-v3-310m cached + MLX (Apple Silicon)
+fn t052_002_single_doc_oracle_yields_perfect_metrics() {
+    let output = Command::new(env!("CARGO_BIN_EXE_eval_harness"))
+        .args(["evaluate", "kind=single_doc_oracle"])
+        .output()
+        .expect("spawn eval_harness evaluate kind=single_doc_oracle");
+    assert_smoke_success(&output);
+
+    let recall_at_1 = parse_metric_field("T-052-002", &output, "recall_at_1");
+    let mrr = parse_metric_field("T-052-002", &output, "mrr");
+
+    assert!(
+        (recall_at_1 - 1.0).abs() < f64::EPSILON,
+        "[T-052-002] AC 5 single_doc_oracle: recall_at_1 must be 1.0, got {recall_at_1}"
+    );
+    assert!(
+        (mrr - 1.0).abs() < f64::EPSILON,
+        "[T-052-002] AC 5 single_doc_oracle: mrr must be 1.0, got {mrr}"
+    );
+}
+
+// T-052-003: t052_003_capture_oracle_writes_oracle_kind_snapshot
+// Issue #52 AC 2: capture-oracle writes a BaselineSnapshot whose `kind`
+// is `Oracle` and whose `captured_with` records the subcommand. Guards
+// against a future refactor stamping the wrong kind discriminator and
+// silently producing a Forward-shaped file under the oracle name.
+#[test]
+#[ignore] // requires ruri-v3-310m cached + MLX (Apple Silicon)
+fn t052_003_capture_oracle_writes_oracle_kind_snapshot() {
+    use amici::eval::baseline::BaselineKind;
+
+    let tempdir = tempfile::tempdir().expect("create tempdir for oracle baseline output");
+    let oracle_path = tempdir.path().join("oracle_baseline.json");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_eval_harness"))
+        .args([
+            "capture-oracle",
+            &format!("output={}", oracle_path.display()),
+        ])
+        .output()
+        .expect("spawn eval_harness capture-oracle");
+    assert_smoke_success(&output);
+
+    assert!(
+        oracle_path.exists(),
+        "[T-052-003] AC 2: capture-oracle must create {} (stderr: {})",
+        oracle_path.display(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = fs::read_to_string(&oracle_path)
+        .unwrap_or_else(|e| panic!("[T-052-003] read {}: {e}", oracle_path.display()));
+    let snapshot: BaselineSnapshot = serde_json::from_str(&text).unwrap_or_else(|e| {
+        panic!(
+            "[T-052-003] AC 2: oracle_baseline.json must deserialise into BaselineSnapshot \
+             ({e}), got: {text}"
+        )
+    });
+    assert_eq!(
+        snapshot.kind,
+        BaselineKind::Oracle,
+        "[T-052-003] AC 2: kind must be Oracle, got {:?}",
+        snapshot.kind
+    );
+    assert_eq!(
+        snapshot.captured_with, "eval_harness capture-oracle",
+        "[T-052-003] AC 2: captured_with must record subcommand, got {:?}",
+        snapshot.captured_with
+    );
+}
+
 // T-019: t019_verify_baseline_passes_against_committed_snapshot
 // FR-017: verify-baseline against the committed baseline.json must exit 0
 //         with stderr containing "verify-baseline: passed".

@@ -39,11 +39,15 @@ pub const UNINFORMATIVE_HALF_WIDTH: f64 = 0.10;
 pub const BASELINE_SCHEMA_VERSION: &str = "1.1";
 
 /// Discriminator distinguishing forward (`capture-baseline`) from reverse
-/// (`capture-reverse-baseline`) baseline files.
+/// (`capture-reverse-baseline`) and oracle (`capture-oracle`) baseline files.
 ///
-/// Both files share the [`BASELINE_SCHEMA_VERSION`] envelope; consumers read
-/// `kind` first to pick the right body shape rather than inferring from the
-/// presence of fields.
+/// All three files share the [`BASELINE_SCHEMA_VERSION`] envelope; consumers
+/// read `kind` first to pick the right body shape rather than inferring
+/// from the presence of fields. `Forward` and `Oracle` share the
+/// [`BaselineSnapshot`] body shape — the discriminator distinguishes the
+/// production-ranker capture from the retrieval-ceiling capture so
+/// `oracle-gap` (Issue #52) can refuse to compare a Forward against a
+/// Forward by mistake.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BaselineKind {
@@ -54,6 +58,11 @@ pub enum BaselineKind {
     /// `capture-reverse-baseline`. Body shape lives in the binary
     /// (`observed_lower_bound`, `k`, `captured_with`).
     Reverse,
+    /// Oracle retrieval-ceiling baseline produced by `capture-oracle`
+    /// (Issue #52). Body matches [`BaselineSnapshot`]; the difference
+    /// from `Forward` is that Stage 2 forced every relevance_map doc to
+    /// rank 0 so Stage 3 + Stage 4 ran against an idealised retrieval.
+    Oracle,
 }
 
 /// Frozen baseline produced by `eval_harness capture-baseline` and verified
@@ -307,6 +316,54 @@ mod tests {
         assert_eq!(parsed.schema_version, BASELINE_SCHEMA_VERSION);
         assert_eq!(parsed.kind, BaselineKind::Forward);
         assert_eq!(parsed.timestamp, "epoch:42");
+    }
+
+    // T-052-301: baseline_kind_oracle_serialises_as_snake_case
+    //
+    // Issue #52: BaselineKind::Oracle round-trips through serde_json as
+    // the snake_case label "oracle". Pinning the wire format guards
+    // against a future kind variant accidentally changing the discriminator
+    // name (which would invalidate every committed oracle_baseline.json).
+    #[test]
+    fn baseline_kind_oracle_serialises_as_snake_case() {
+        let json = serde_json::to_string(&BaselineKind::Oracle).expect("serialise");
+        assert_eq!(
+            json, "\"oracle\"",
+            "Oracle variant must serialise to \"oracle\""
+        );
+        let parsed: BaselineKind = serde_json::from_str(&json).expect("round-trip");
+        assert_eq!(parsed, BaselineKind::Oracle);
+    }
+
+    // T-052-302: baseline_snapshot_round_trips_with_oracle_kind
+    //
+    // The full BaselineSnapshot envelope round-trips with kind=Oracle,
+    // proving Forward and Oracle share a body shape and only differ in
+    // the discriminator. Required for `capture-oracle` to reuse
+    // [`write_json`] without a separate serialisation path.
+    #[test]
+    fn baseline_snapshot_round_trips_with_oracle_kind() {
+        let snap = BaselineSnapshot {
+            schema_version: BASELINE_SCHEMA_VERSION.to_owned(),
+            kind: BaselineKind::Oracle,
+            captured_with: "eval_harness capture-oracle".to_owned(),
+            timestamp: "epoch:42".to_owned(),
+            model_id: "test/model".to_owned(),
+            model_revision: "rev".to_owned(),
+            mlx_rs_version: "0.0.0".to_owned(),
+            fixture_hash: "fnv1a64:0".to_owned(),
+            aggregation: default_aggregation_kind(),
+            merge_config: HybridSearchConfig::default(),
+            normalization: pre_phase_5_disabled(),
+            global: vec![],
+            per_category: BTreeMap::new(),
+            latency_p50_ms: 0.0,
+            latency_p95_ms: 0.0,
+        };
+        let json = serde_json::to_string(&snap).expect("serialise");
+        let parsed: BaselineSnapshot = serde_json::from_str(&json).expect("round-trip");
+        assert_eq!(parsed.kind, BaselineKind::Oracle);
+        assert_eq!(parsed.captured_with, "eval_harness capture-oracle");
     }
 
     // T-021: committed_baseline_json_deserialises_under_new_schema

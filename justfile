@@ -41,6 +41,15 @@ eval-reverse:
     cargo run --bin eval_harness --features eval-harness --release -- \
       capture-reverse-baseline output=tests/fixtures/eval/reverse_baseline.json
 
+# Recapture oracle baseline (Issue #52) → tests/fixtures/eval/oracle_baseline.json (MLX required)
+# Forces every relevance_map doc to rank 0 in Stage 2 to surface the
+# retrieval ceiling — pair with `eval-verify` on baseline.json to compute
+# the search-side gap (Phase 2 priority signal).
+eval-oracle:
+    cargo run --bin eval_harness --features eval-harness --release -- \
+      capture-oracle aggregation=identity \
+      output=tests/fixtures/eval/oracle_baseline.json
+
 # Capture a variant baseline to /tmp (agg = identity / max-chunk / dedupe / topk-average)
 eval-baseline-variant agg:
     cargo run --bin eval_harness --features eval-harness --release -- \

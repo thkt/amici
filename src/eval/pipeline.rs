@@ -141,10 +141,7 @@ where
     R: Rerank,
     A: Aggregator,
 {
-    ensure_sqlite_vec().map_err(PipelineError::SqliteVec)?;
-    let conn = Connection::open_in_memory()?;
-    create_schema(&conn)?;
-    index_corpus(&conn, corpus, embedder, normalization)?;
+    let conn = setup_pipeline_connection(corpus, embedder, normalization)?;
 
     // Build (doc_id → body) lookup once before the query loop. apply_reranker
     // does O(1) hits against this map instead of an O(N) corpus.iter().find()
@@ -180,6 +177,34 @@ where
         });
     }
     Ok(results)
+}
+
+/// Initialise an in-memory SQLite connection, build the eval-harness
+/// schema, and index `corpus` into all three tables.
+///
+/// Centralises the four-step setup (`ensure_sqlite_vec` →
+/// `Connection::open_in_memory` → [`create_schema`] → [`index_corpus`])
+/// so [`evaluate`] and [`crate::eval::oracle_pipeline::evaluate_oracle`]
+/// share a single bring-up path. The returned [`Connection`] is owned by
+/// the caller and dropped (closing the in-memory DB) when the eval run
+/// finishes.
+///
+/// # Errors
+///
+/// Returns [`PipelineError::SqliteVec`] when the `sqlite_vec` extension
+/// fails to register, [`PipelineError::Sqlite`] for SQLite errors during
+/// schema creation, and the [`PipelineError`] variants surfaced by
+/// [`index_corpus`] for embed / chunk-id failures.
+pub(super) fn setup_pipeline_connection<E: Embed>(
+    corpus: &[EvalDocument],
+    embedder: &E,
+    normalization: &QueryNormalizationConfig,
+) -> Result<Connection, PipelineError> {
+    ensure_sqlite_vec().map_err(PipelineError::SqliteVec)?;
+    let conn = Connection::open_in_memory()?;
+    create_schema(&conn)?;
+    index_corpus(&conn, corpus, embedder, normalization)?;
+    Ok(conn)
 }
 
 /// Build the in-memory schema (documents + FTS5 + vec0 + fts5vocab).
@@ -272,8 +297,12 @@ fn index_corpus<E: Embed>(
 
 /// Drive one `EvalQuery` through FTS + vec retrieval, RRF merge, Stage 3
 /// aggregation, and (when supplied) reranker rescoring.
+///
+/// `pub(super)` so [`crate::eval::oracle_pipeline::evaluate_oracle`] can
+/// reuse the per-query stage chain with a different `merge_strategy`
+/// without forking the whole pipeline body.
 #[allow(clippy::too_many_arguments)]
-fn run_single_query<E, R, A, M>(
+pub(super) fn run_single_query<E, R, A, M>(
     conn: &Connection,
     query: &EvalQuery,
     embedder: &E,
