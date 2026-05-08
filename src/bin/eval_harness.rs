@@ -318,9 +318,9 @@ where
 }
 
 /// Run [`evaluate_oracle`] with the concrete aggregator selected by
-/// `aggregation`. Mirrors [`dispatch_pipeline`] for the Oracle path
-/// (Issue #52); the two helpers stay separate because their return types
-/// differ ([`PipelineError`] vs [`OracleError`]).
+/// `aggregation`. Mirrors [`dispatch_pipeline`] for the Oracle path; the
+/// two helpers stay separate because their return types differ
+/// ([`PipelineError`] vs [`OracleError`]).
 #[allow(clippy::too_many_arguments)]
 fn dispatch_oracle_pipeline<E, R>(
     corpus: &[EvalDocument],
@@ -687,7 +687,6 @@ fn run_capture_baseline(kvs: &HashMap<String, String>) -> ExitCode {
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 fn run_capture_baseline_with<E: Embed, R: Rerank>(
     ctx: &EvalContext<E, R>,
     output_path: &Path,
@@ -904,7 +903,6 @@ fn run_capture_oracle(kvs: &HashMap<String, String>) -> ExitCode {
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 fn run_capture_oracle_with<E: Embed, R: Rerank>(
     ctx: &EvalContext<E, R>,
     output_path: &Path,
