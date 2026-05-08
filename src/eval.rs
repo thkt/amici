@@ -6,6 +6,7 @@
 //! run. Feature-gated behind `eval-harness`; default `amici` builds skip
 //! the module.
 
+pub mod annotation;
 pub mod baseline;
 pub mod fixture;
 pub mod metrics;
