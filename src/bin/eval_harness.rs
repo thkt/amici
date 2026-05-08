@@ -10,6 +10,7 @@
 //! eval_harness evaluate [kind=full|identity|reverse|single_doc|shuffled]
 //! eval_harness capture-baseline output=<path>
 //! eval_harness capture-reverse-baseline output=<path>
+//! eval_harness capture-oracle output=<path>
 //! eval_harness verify-baseline baseline=<path>
 //! ```
 //!
@@ -37,6 +38,7 @@ use amici::eval::fixture::{
     EvalDocument, EvalQuery, load_documents, load_known_answers, load_queries,
 };
 use amici::eval::metrics::{MetricResult, bootstrap_ci, mrr_at_k, ndcg_at_k, recall_at_k};
+use amici::eval::oracle_pipeline::{OracleError, evaluate_oracle};
 use amici::eval::pipeline::{PipelineConfig, PipelineError, QueryResult, evaluate as run_pipeline};
 use rurico::embed::Embed;
 use rurico::reranker::Rerank;
@@ -88,7 +90,29 @@ const BOOTSTRAP_SEED: u64 = 42;
 
 /// Closed set of fixture kinds accepted by `evaluate kind=...`. Anchors the
 /// argv validation in `run_evaluate` and the dispatch in `load_fixture_for_kind`.
-const VALID_EVALUATE_KINDS: &[&str] = &["full", "shuffled", "identity", "reverse", "single_doc"];
+///
+/// Kinds ending in `_oracle` route through [`evaluate_oracle`] (Issue #52)
+/// against the underlying fixture (`full_oracle` → `documents.jsonl` +
+/// `queries.jsonl`; `identity_oracle` → `known_answers.jsonl::identity`;
+/// `single_doc_oracle` → `known_answers.jsonl::single_doc`). The `reverse`
+/// and `shuffled` paths have no oracle counterpart — both are designed to
+/// degrade ranking quality, so a forced top-rank inject would defeat the
+/// fixture's purpose.
+const VALID_EVALUATE_KINDS: &[&str] = &[
+    "full",
+    "shuffled",
+    "identity",
+    "reverse",
+    "single_doc",
+    "full_oracle",
+    "identity_oracle",
+    "single_doc_oracle",
+];
+
+/// Suffix on [`VALID_EVALUATE_KINDS`] entries that route through the Oracle
+/// retrieval pipeline. Kept as a single constant so the `_oracle` literal
+/// only appears in one place across argv validation and dispatch.
+const ORACLE_KIND_SUFFIX: &str = "_oracle";
 
 /// Closed set of Stage 3 aggregation kinds accepted by `aggregation=...`.
 /// Anchors argv validation and round-tripping with the `aggregation` field
@@ -293,6 +317,69 @@ where
     }
 }
 
+/// Run [`evaluate_oracle`] with the concrete aggregator selected by
+/// `aggregation`. Mirrors [`dispatch_pipeline`] for the Oracle path; the
+/// two helpers stay separate because their return types differ
+/// ([`PipelineError`] vs [`OracleError`]).
+#[allow(clippy::too_many_arguments)]
+fn dispatch_oracle_pipeline<E, R>(
+    corpus: &[EvalDocument],
+    queries: &[EvalQuery],
+    embedder: &E,
+    reranker: Option<&R>,
+    aggregation: AggregationKind,
+    merge_config: &HybridSearchConfig,
+    normalization: &QueryNormalizationConfig,
+    config: &PipelineConfig,
+) -> Result<Vec<QueryResult>, OracleError>
+where
+    E: Embed,
+    R: Rerank,
+{
+    match aggregation {
+        AggregationKind::Identity => evaluate_oracle(
+            corpus,
+            queries,
+            embedder,
+            reranker,
+            &IdentityAggregator,
+            merge_config,
+            normalization,
+            config,
+        ),
+        AggregationKind::MaxChunk => evaluate_oracle(
+            corpus,
+            queries,
+            embedder,
+            reranker,
+            &MaxChunkAggregator,
+            merge_config,
+            normalization,
+            config,
+        ),
+        AggregationKind::Dedupe => evaluate_oracle(
+            corpus,
+            queries,
+            embedder,
+            reranker,
+            &DedupeAggregator,
+            merge_config,
+            normalization,
+            config,
+        ),
+        AggregationKind::TopKAverage(k) => evaluate_oracle(
+            corpus,
+            queries,
+            embedder,
+            reranker,
+            &TopKAverageAggregator::new(k),
+            merge_config,
+            normalization,
+            config,
+        ),
+    }
+}
+
 /// Parse query-normalization overrides from argv kvs.
 ///
 /// Recognised keys (all optional, all boolean):
@@ -412,7 +499,7 @@ fn main() -> ExitCode {
     let Some(mode) = args.first() else {
         eprintln!(
             "usage: eval_harness <evaluate|capture-baseline|capture-reverse-baseline|\
-             verify-baseline|compare-baselines> [key=value...]"
+             capture-oracle|verify-baseline|compare-baselines> [key=value...]"
         );
         return ExitCode::from(EXIT_USAGE);
     };
@@ -425,6 +512,7 @@ fn main() -> ExitCode {
         "evaluate" => run_evaluate(&kvs),
         "capture-baseline" => run_capture_baseline(&kvs),
         "capture-reverse-baseline" => run_capture_reverse_baseline(&kvs),
+        "capture-oracle" => run_capture_oracle(&kvs),
         "verify-baseline" => run_verify_baseline(&kvs),
         "compare-baselines" => run_compare_baselines(&kvs),
         other => {
@@ -490,19 +578,35 @@ fn run_evaluate_with<E: Embed, R: Rerank>(
         }
     };
     let config = PipelineConfig { k: PIPELINE_K };
-    let mut results = match dispatch_pipeline(
-        &corpus,
-        &queries,
-        &ctx.embedder,
-        Some(&ctx.reranker),
-        aggregation,
-        merge_config,
-        normalization,
-        &config,
-    ) {
+    let pipeline_result = if kind.ends_with(ORACLE_KIND_SUFFIX) {
+        dispatch_oracle_pipeline(
+            &corpus,
+            &queries,
+            &ctx.embedder,
+            Some(&ctx.reranker),
+            aggregation,
+            merge_config,
+            normalization,
+            &config,
+        )
+        .map_err(|e| format!("{e}"))
+    } else {
+        dispatch_pipeline(
+            &corpus,
+            &queries,
+            &ctx.embedder,
+            Some(&ctx.reranker),
+            aggregation,
+            merge_config,
+            normalization,
+            &config,
+        )
+        .map_err(|e| format!("{e}"))
+    };
+    let mut results = match pipeline_result {
         Ok(r) => r,
-        Err(e) => {
-            eprintln!("evaluate({kind}): pipeline failed: {e}");
+        Err(msg) => {
+            eprintln!("evaluate({kind}): pipeline failed: {msg}");
             return ExitCode::from(EXIT_INFRA);
         }
     };
@@ -583,7 +687,6 @@ fn run_capture_baseline(kvs: &HashMap<String, String>) -> ExitCode {
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 fn run_capture_baseline_with<E: Embed, R: Rerank>(
     ctx: &EvalContext<E, R>,
     output_path: &Path,
@@ -739,6 +842,135 @@ fn run_capture_reverse_baseline_with<E: Embed, R: Rerank>(
     ExitCode::SUCCESS
 }
 
+/// `capture-oracle output=<path> [aggregation=<kind>] [rrf_k=N] [fts_weight=W]
+/// [vector_weight=W]` — run the Oracle retrieval pipeline (Issue #52) and
+/// write a `BaselineSnapshot` with `kind=Oracle` to `output=`. Mirrors
+/// `capture-baseline` argv shape so operators can swap subcommands without
+/// re-learning options.
+///
+/// Aggregation / merge / normalization knobs flow through the same parsers
+/// because the oracle baseline measures the **post-retrieval ceiling under
+/// the production rerank/aggregation stack**, not a fully idealised
+/// pipeline — Issue #52 design choice anchored to CoSearch's "freeze the
+/// retrieval, vary the reasoning" framing.
+fn run_capture_oracle(kvs: &HashMap<String, String>) -> ExitCode {
+    let Some(output_path_raw) = kvs.get("output") else {
+        eprintln!("capture-oracle: output= argument required");
+        return ExitCode::from(EXIT_USAGE);
+    };
+    let output_path = match validate_output_path(output_path_raw) {
+        Ok(p) => p,
+        Err(msg) => {
+            eprintln!("capture-oracle: {msg}");
+            return ExitCode::from(EXIT_USAGE);
+        }
+    };
+    let aggregation = match AggregationKind::from_kvs(kvs) {
+        Ok(a) => a,
+        Err(msg) => {
+            eprintln!("capture-oracle: {msg}");
+            return ExitCode::from(EXIT_USAGE);
+        }
+    };
+    let merge_config = match parse_merge_config_from_kvs(kvs) {
+        Ok(c) => c,
+        Err(msg) => {
+            eprintln!("capture-oracle: {msg}");
+            return ExitCode::from(EXIT_USAGE);
+        }
+    };
+    let normalization = match parse_normalization_from_kvs(kvs) {
+        Ok(c) => c,
+        Err(msg) => {
+            eprintln!("capture-oracle: {msg}");
+            return ExitCode::from(EXIT_USAGE);
+        }
+    };
+    let ctx = match production_context() {
+        Ok(c) => c,
+        Err(msg) => {
+            eprintln!("capture-oracle: {msg}");
+            return ExitCode::from(EXIT_INFRA);
+        }
+    };
+    log_run_context(&ctx, "capture-oracle", None, Some(&output_path));
+    run_capture_oracle_with(
+        &ctx,
+        &output_path,
+        aggregation,
+        &merge_config,
+        &normalization,
+    )
+}
+
+fn run_capture_oracle_with<E: Embed, R: Rerank>(
+    ctx: &EvalContext<E, R>,
+    output_path: &Path,
+    aggregation: AggregationKind,
+    merge_config: &HybridSearchConfig,
+    normalization: &QueryNormalizationConfig,
+) -> ExitCode {
+    let (corpus, queries) = match load_fixture_for_kind(&ctx.fixture_dir, "full") {
+        Ok(v) => v,
+        Err(msg) => {
+            eprintln!("capture-oracle: {msg}");
+            return ExitCode::from(EXIT_INFRA);
+        }
+    };
+    let fixture_hash = match hash_fixture_dir(&ctx.fixture_dir) {
+        Ok(h) => h,
+        Err(msg) => {
+            eprintln!("capture-oracle: {msg}");
+            return ExitCode::from(EXIT_INFRA);
+        }
+    };
+    let config = PipelineConfig { k: PIPELINE_K };
+    let results = match dispatch_oracle_pipeline(
+        &corpus,
+        &queries,
+        &ctx.embedder,
+        Some(&ctx.reranker),
+        aggregation,
+        merge_config,
+        normalization,
+        &config,
+    ) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("capture-oracle: pipeline failed: {e}");
+            return ExitCode::from(EXIT_INFRA);
+        }
+    };
+
+    let global = build_global_metrics(&results, &queries);
+    let per_category = build_per_category_metrics(&results, &queries);
+    let (latency_p50_ms, latency_p95_ms) = compute_latency_percentiles(&results);
+    let snapshot = BaselineSnapshot {
+        schema_version: BASELINE_SCHEMA_VERSION.to_owned(),
+        kind: BaselineKind::Oracle,
+        captured_with: "eval_harness capture-oracle".to_owned(),
+        timestamp: (ctx.timestamp)(),
+        model_id: embed::ModelId::default().repo_id().to_owned(),
+        model_revision: RURI_V3_310M_REVISION.to_owned(),
+        mlx_rs_version: MLX_RS_VERSION.to_owned(),
+        fixture_hash,
+        aggregation: aggregation.name(),
+        merge_config: merge_config.clone(),
+        normalization: *normalization,
+        global,
+        per_category,
+        latency_p50_ms,
+        latency_p95_ms,
+    };
+
+    if let Err(e) = write_json(&snapshot, output_path) {
+        eprintln!("capture-oracle: write failed: {e}");
+        return ExitCode::from(EXIT_INFRA);
+    }
+    eprintln!("capture-oracle: wrote {}", output_path.display());
+    ExitCode::SUCCESS
+}
+
 /// `verify-baseline baseline=<path>` — re-run evaluation, compare against the
 /// committed baseline.json under ADR 0002 tolerance, exit 0 + stderr banner
 /// `verify-baseline: passed` on success (FR-017 / AC-5.3).
@@ -781,7 +1013,7 @@ fn run_verify_baseline(kvs: &HashMap<String, String>) -> ExitCode {
     if committed.kind != BaselineKind::Forward {
         eprintln!(
             "verify-baseline: failed — committed kind {:?} is not Forward; \
-             did you pass reverse_baseline.json by mistake?",
+             did you pass reverse_baseline.json or oracle_baseline.json by mistake?",
             committed.kind
         );
         return ExitCode::from(EXIT_INFRA);
@@ -929,12 +1161,15 @@ fn validate_baseline_path(raw: &str) -> Result<PathBuf, String> {
 
 /// Load corpus + queries for `kind` from `fixture_dir`. `full` / `shuffled`
 /// use `documents.jsonl` + `queries.jsonl`; the known-answer kinds pull a
-/// sub-fixture from `known_answers.jsonl`.
+/// sub-fixture from `known_answers.jsonl`. `_oracle`-suffixed kinds map to
+/// the underlying fixture (e.g. `identity_oracle` → identity sub-fixture);
+/// the suffix only flips the dispatch in [`run_evaluate_with`].
 fn load_fixture_for_kind(
     fixture_dir: &Path,
     kind: &str,
 ) -> Result<(Vec<EvalDocument>, Vec<EvalQuery>), String> {
-    match kind {
+    let underlying = kind.strip_suffix(ORACLE_KIND_SUFFIX).unwrap_or(kind);
+    match underlying {
         "full" | "shuffled" => {
             let docs = load_documents(&fixture_dir.join("documents.jsonl"))
                 .map_err(|e| format!("load_documents: {e}"))?;

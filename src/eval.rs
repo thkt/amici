@@ -9,4 +9,5 @@
 pub mod baseline;
 pub mod fixture;
 pub mod metrics;
+pub mod oracle_pipeline;
 pub mod pipeline;

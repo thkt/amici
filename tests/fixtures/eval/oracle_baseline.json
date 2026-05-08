@@ -1,0 +1,333 @@
+{
+  "schema_version": "1.1",
+  "kind": "oracle",
+  "captured_with": "eval_harness capture-oracle",
+  "timestamp": "epoch:1778206324",
+  "model_id": "cl-nagoya/ruri-v3-310m",
+  "model_revision": "pinned-via-rurico-embed-cache",
+  "mlx_rs_version": "0.25",
+  "fixture_hash": "fnv1a64:88afbfc4e99e0a84",
+  "aggregation": "identity",
+  "merge_config": {
+    "rrf_k": 60.0,
+    "source_weights": {
+      "vector": 1.0,
+      "fts": 1.0
+    }
+  },
+  "normalization": {
+    "nfkc": true,
+    "ascii_lowercase": true,
+    "collapse_whitespace": true
+  },
+  "global": [
+    {
+      "name": "recall@5",
+      "k": 5,
+      "point_estimate": 0.7200396825396826,
+      "ci_lower": 0.6905753968253968,
+      "ci_upper": 0.7512896825396826,
+      "uninformative": false
+    },
+    {
+      "name": "recall@10",
+      "k": 10,
+      "point_estimate": 1.0,
+      "ci_lower": 1.0,
+      "ci_upper": 1.0,
+      "uninformative": false
+    },
+    {
+      "name": "mrr@10",
+      "k": 10,
+      "point_estimate": 1.0,
+      "ci_lower": 1.0,
+      "ci_upper": 1.0,
+      "uninformative": false
+    },
+    {
+      "name": "ndcg@10",
+      "k": 10,
+      "point_estimate": 0.947417468881108,
+      "ci_lower": 0.9380144950499698,
+      "ci_upper": 0.9555539325334218,
+      "uninformative": false
+    }
+  ],
+  "per_category": {
+    "comparative": [
+      {
+        "name": "recall@5",
+        "k": 5,
+        "point_estimate": 0.7,
+        "ci_lower": 0.6095238095238095,
+        "ci_upper": 0.7833333333333333,
+        "uninformative": false
+      },
+      {
+        "name": "recall@10",
+        "k": 10,
+        "point_estimate": 1.0,
+        "ci_lower": 1.0,
+        "ci_upper": 1.0,
+        "uninformative": false
+      },
+      {
+        "name": "mrr@10",
+        "k": 10,
+        "point_estimate": 1.0,
+        "ci_lower": 1.0,
+        "ci_upper": 1.0,
+        "uninformative": false
+      },
+      {
+        "name": "ndcg@10",
+        "k": 10,
+        "point_estimate": 0.9570131387426085,
+        "ci_lower": 0.9391914260511297,
+        "ci_upper": 0.9739230629079416,
+        "uninformative": false
+      }
+    ],
+    "conceptual": [
+      {
+        "name": "recall@5",
+        "k": 5,
+        "point_estimate": 0.7031746031746032,
+        "ci_lower": 0.6095238095238096,
+        "ci_upper": 0.7888888888888891,
+        "uninformative": false
+      },
+      {
+        "name": "recall@10",
+        "k": 10,
+        "point_estimate": 1.0,
+        "ci_lower": 1.0,
+        "ci_upper": 1.0,
+        "uninformative": false
+      },
+      {
+        "name": "mrr@10",
+        "k": 10,
+        "point_estimate": 1.0,
+        "ci_lower": 1.0,
+        "ci_upper": 1.0,
+        "uninformative": false
+      },
+      {
+        "name": "ndcg@10",
+        "k": 10,
+        "point_estimate": 0.9506746255042603,
+        "ci_lower": 0.9344869648048872,
+        "ci_upper": 0.9662463831054537,
+        "uninformative": false
+      }
+    ],
+    "definitional": [
+      {
+        "name": "recall@5",
+        "k": 5,
+        "point_estimate": 0.676984126984127,
+        "ci_lower": 0.611111111111111,
+        "ci_upper": 0.7412698412698413,
+        "uninformative": false
+      },
+      {
+        "name": "recall@10",
+        "k": 10,
+        "point_estimate": 1.0,
+        "ci_lower": 1.0,
+        "ci_upper": 1.0,
+        "uninformative": false
+      },
+      {
+        "name": "mrr@10",
+        "k": 10,
+        "point_estimate": 1.0,
+        "ci_lower": 1.0,
+        "ci_upper": 1.0,
+        "uninformative": false
+      },
+      {
+        "name": "ndcg@10",
+        "k": 10,
+        "point_estimate": 0.9387410192400452,
+        "ci_lower": 0.9173450456161811,
+        "ci_upper": 0.9577831111082179,
+        "uninformative": false
+      }
+    ],
+    "factoid": [
+      {
+        "name": "recall@5",
+        "k": 5,
+        "point_estimate": 0.7658730158730158,
+        "ci_lower": 0.6746031746031746,
+        "ci_upper": 0.8531746031746033,
+        "uninformative": false
+      },
+      {
+        "name": "recall@10",
+        "k": 10,
+        "point_estimate": 1.0,
+        "ci_lower": 1.0,
+        "ci_upper": 1.0,
+        "uninformative": false
+      },
+      {
+        "name": "mrr@10",
+        "k": 10,
+        "point_estimate": 1.0,
+        "ci_lower": 1.0,
+        "ci_upper": 1.0,
+        "uninformative": false
+      },
+      {
+        "name": "ndcg@10",
+        "k": 10,
+        "point_estimate": 0.9601781667669697,
+        "ci_lower": 0.9476983053601403,
+        "ci_upper": 0.9716387324248144,
+        "uninformative": false
+      }
+    ],
+    "howto": [
+      {
+        "name": "recall@5",
+        "k": 5,
+        "point_estimate": 0.7031746031746032,
+        "ci_lower": 0.6158730158730158,
+        "ci_upper": 0.7873015873015872,
+        "uninformative": false
+      },
+      {
+        "name": "recall@10",
+        "k": 10,
+        "point_estimate": 1.0,
+        "ci_lower": 1.0,
+        "ci_upper": 1.0,
+        "uninformative": false
+      },
+      {
+        "name": "mrr@10",
+        "k": 10,
+        "point_estimate": 1.0,
+        "ci_lower": 1.0,
+        "ci_upper": 1.0,
+        "uninformative": false
+      },
+      {
+        "name": "ndcg@10",
+        "k": 10,
+        "point_estimate": 0.9222885339993571,
+        "ci_lower": 0.8736695192831133,
+        "ci_upper": 0.9633591107584204,
+        "uninformative": false
+      }
+    ],
+    "listing": [
+      {
+        "name": "recall@5",
+        "k": 5,
+        "point_estimate": 0.6404761904761905,
+        "ci_lower": 0.5666666666666667,
+        "ci_upper": 0.7166666666666667,
+        "uninformative": false
+      },
+      {
+        "name": "recall@10",
+        "k": 10,
+        "point_estimate": 1.0,
+        "ci_lower": 1.0,
+        "ci_upper": 1.0,
+        "uninformative": false
+      },
+      {
+        "name": "mrr@10",
+        "k": 10,
+        "point_estimate": 1.0,
+        "ci_lower": 1.0,
+        "ci_upper": 1.0,
+        "uninformative": false
+      },
+      {
+        "name": "ndcg@10",
+        "k": 10,
+        "point_estimate": 0.9341278252974499,
+        "ci_lower": 0.9163042519379759,
+        "ci_upper": 0.9530551796723765,
+        "uninformative": false
+      }
+    ],
+    "troubleshooting": [
+      {
+        "name": "recall@5",
+        "k": 5,
+        "point_estimate": 0.6976190476190476,
+        "ci_lower": 0.6333333333333334,
+        "ci_upper": 0.7619047619047619,
+        "uninformative": false
+      },
+      {
+        "name": "recall@10",
+        "k": 10,
+        "point_estimate": 1.0,
+        "ci_lower": 1.0,
+        "ci_upper": 1.0,
+        "uninformative": false
+      },
+      {
+        "name": "mrr@10",
+        "k": 10,
+        "point_estimate": 1.0,
+        "ci_lower": 1.0,
+        "ci_upper": 1.0,
+        "uninformative": false
+      },
+      {
+        "name": "ndcg@10",
+        "k": 10,
+        "point_estimate": 0.951523402963173,
+        "ci_lower": 0.9339699548631354,
+        "ci_upper": 0.9676853451726773,
+        "uninformative": false
+      }
+    ],
+    "variant_notation": [
+      {
+        "name": "recall@5",
+        "k": 5,
+        "point_estimate": 0.8730158730158729,
+        "ci_lower": 0.7777777777777776,
+        "ci_upper": 0.9523809523809523,
+        "uninformative": false
+      },
+      {
+        "name": "recall@10",
+        "k": 10,
+        "point_estimate": 1.0,
+        "ci_lower": 1.0,
+        "ci_upper": 1.0,
+        "uninformative": false
+      },
+      {
+        "name": "mrr@10",
+        "k": 10,
+        "point_estimate": 1.0,
+        "ci_lower": 1.0,
+        "ci_upper": 1.0,
+        "uninformative": false
+      },
+      {
+        "name": "ndcg@10",
+        "k": 10,
+        "point_estimate": 0.9647930385350004,
+        "ci_lower": 0.9477577061247511,
+        "ci_upper": 0.9802541392294131,
+        "uninformative": false
+      }
+    ]
+  },
+  "latency_p50_ms": 2083.0,
+  "latency_p95_ms": 3103.0
+}
