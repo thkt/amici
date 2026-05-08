@@ -54,6 +54,49 @@ pub enum OracleGapError {
         /// Oracle snapshot fixture content hash.
         oracle: String,
     },
+    /// The two snapshots were captured under different pipeline knobs
+    /// (`aggregation`, `merge_config`, `normalization`, or model
+    /// identity). The gap would no longer measure the oracle under the
+    /// same downstream stack — AC 4 could swing on a config typo.
+    #[error(
+        "oracle-gap: {field} mismatch — \
+         baseline and oracle were captured under different pipeline configs \
+         (baseline={baseline:?}, oracle={oracle:?})"
+    )]
+    PipelineConfigMismatch {
+        /// Snapshot field that disagreed (`aggregation`, `merge_config`,
+        /// `normalization`, `model_id`, or `model_revision`).
+        field: &'static str,
+        /// Forward snapshot value (debug-formatted).
+        baseline: String,
+        /// Oracle snapshot value (debug-formatted).
+        oracle: String,
+    },
+    /// A category present on the baseline is absent from the oracle.
+    /// AC 4 would silently skip that bucket and PASS vacuously.
+    #[error(
+        "oracle-gap: oracle snapshot is missing per-category bucket {category:?} \
+         that baseline reports — regenerate before comparing"
+    )]
+    MissingOracleCategory {
+        /// Category label that exists on the baseline but not the oracle.
+        category: String,
+    },
+    /// A metric present on the baseline is absent from the oracle for a
+    /// given bucket (global or per-category). AC 4 would silently skip
+    /// that metric.
+    #[error(
+        "oracle-gap: oracle snapshot is missing metric {metric:?}@{k} in {scope} — \
+         regenerate before comparing"
+    )]
+    MissingOracleMetric {
+        /// Scope label (`"<global>"` or category name).
+        scope: String,
+        /// Metric label that exists on the baseline but not the oracle.
+        metric: String,
+        /// `k` cutoff carried by the missing metric.
+        k: usize,
+    },
 }
 
 /// Per-metric difference between Forward and Oracle.
@@ -98,9 +141,11 @@ pub struct Ac4Violation {
 pub struct OracleGap {
     /// Per-metric diff over the global aggregation.
     pub global: Vec<MetricGap>,
-    /// Per-category diff. Categories that appear on only one side are
-    /// dropped silently; the [`OracleGapError::FixtureHashMismatch`]
-    /// guard already rejects such inputs upstream.
+    /// Per-category diff. Every baseline category must have an oracle
+    /// counterpart with the same metric set; mismatches surface as
+    /// [`OracleGapError::MissingOracleCategory`] /
+    /// [`OracleGapError::MissingOracleMetric`] so AC 4 cannot PASS
+    /// vacuously on a partially-edited snapshot.
     pub per_category: BTreeMap<String, Vec<MetricGap>>,
     /// AC 4 violations detected across the per-category breakdown.
     /// `recall@k` is the only metric subject to the gate (the issue body
@@ -140,14 +185,18 @@ pub fn compute_gap(
             oracle: oracle.fixture_hash.clone(),
         });
     }
+    enforce_pipeline_config_match(baseline, oracle)?;
 
-    let global = diff_metric_lists(&baseline.global, &oracle.global);
+    let global = diff_metric_lists(&baseline.global, &oracle.global, "<global>")?;
     let mut per_category: BTreeMap<String, Vec<MetricGap>> = BTreeMap::new();
     for (category, baseline_metrics) in &baseline.per_category {
-        if let Some(oracle_metrics) = oracle.per_category.get(category) {
-            let gap = diff_metric_lists(baseline_metrics, oracle_metrics);
-            per_category.insert(category.clone(), gap);
-        }
+        let oracle_metrics = oracle.per_category.get(category).ok_or_else(|| {
+            OracleGapError::MissingOracleCategory {
+                category: category.clone(),
+            }
+        })?;
+        let gap = diff_metric_lists(baseline_metrics, oracle_metrics, category)?;
+        per_category.insert(category.clone(), gap);
     }
     let ac4_violations = detect_ac4_violations(&per_category);
     Ok(OracleGap {
@@ -157,25 +206,84 @@ pub fn compute_gap(
     })
 }
 
-/// Compute per-metric `MetricGap` for two metric lists keyed by `name`.
+/// Reject snapshots whose pipeline knobs disagree.
 ///
-/// Metrics present on only one side are dropped — `compute_gap` already
-/// guarantees the snapshots come from the same fixture under the same
-/// schema, so missing metrics here would mean a corrupted file.
-fn diff_metric_lists(baseline: &[MetricResult], oracle: &[MetricResult]) -> Vec<MetricGap> {
+/// `aggregation`, `merge_config`, `normalization`, `model_id`, and
+/// `model_revision` define the downstream stack. A gap captured under
+/// mismatched knobs no longer measures "retrieval ceiling under the
+/// same rerank/aggregation" — AC 4 could swing on a config typo.
+fn enforce_pipeline_config_match(
+    baseline: &BaselineSnapshot,
+    oracle: &BaselineSnapshot,
+) -> Result<(), OracleGapError> {
+    if baseline.aggregation != oracle.aggregation {
+        return Err(OracleGapError::PipelineConfigMismatch {
+            field: "aggregation",
+            baseline: baseline.aggregation.clone(),
+            oracle: oracle.aggregation.clone(),
+        });
+    }
+    if baseline.merge_config != oracle.merge_config {
+        return Err(OracleGapError::PipelineConfigMismatch {
+            field: "merge_config",
+            baseline: format!("{:?}", baseline.merge_config),
+            oracle: format!("{:?}", oracle.merge_config),
+        });
+    }
+    if baseline.normalization != oracle.normalization {
+        return Err(OracleGapError::PipelineConfigMismatch {
+            field: "normalization",
+            baseline: format!("{:?}", baseline.normalization),
+            oracle: format!("{:?}", oracle.normalization),
+        });
+    }
+    if baseline.model_id != oracle.model_id {
+        return Err(OracleGapError::PipelineConfigMismatch {
+            field: "model_id",
+            baseline: baseline.model_id.clone(),
+            oracle: oracle.model_id.clone(),
+        });
+    }
+    if baseline.model_revision != oracle.model_revision {
+        return Err(OracleGapError::PipelineConfigMismatch {
+            field: "model_revision",
+            baseline: baseline.model_revision.clone(),
+            oracle: oracle.model_revision.clone(),
+        });
+    }
+    Ok(())
+}
+
+/// Compute per-metric `MetricGap` for two metric lists keyed by
+/// `(name, k)`.
+///
+/// Returns [`OracleGapError::MissingOracleMetric`] when a baseline metric
+/// has no oracle counterpart in the same `scope` — silently dropping it
+/// would let AC 4 PASS vacuously on a partially-edited oracle snapshot.
+fn diff_metric_lists(
+    baseline: &[MetricResult],
+    oracle: &[MetricResult],
+    scope: &str,
+) -> Result<Vec<MetricGap>, OracleGapError> {
     let mut out = Vec::with_capacity(baseline.len());
     for b in baseline {
-        if let Some(o) = oracle.iter().find(|o| o.name == b.name && o.k == b.k) {
-            out.push(MetricGap {
-                name: b.name.clone(),
+        let o = oracle
+            .iter()
+            .find(|o| o.name == b.name && o.k == b.k)
+            .ok_or_else(|| OracleGapError::MissingOracleMetric {
+                scope: scope.to_owned(),
+                metric: b.name.clone(),
                 k: b.k,
-                baseline_point: b.point_estimate,
-                oracle_point: o.point_estimate,
-                diff: o.point_estimate - b.point_estimate,
-            });
-        }
+            })?;
+        out.push(MetricGap {
+            name: b.name.clone(),
+            k: b.k,
+            baseline_point: b.point_estimate,
+            oracle_point: o.point_estimate,
+            diff: o.point_estimate - b.point_estimate,
+        });
     }
-    out
+    Ok(out)
 }
 
 /// Scan the per-category gap for `recall@k` regressions and emit one

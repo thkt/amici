@@ -112,6 +112,93 @@ fn compute_gap_rejects_fixture_hash_mismatch() {
     );
 }
 
+// T-052-409: compute_gap_rejects_mismatched_aggregation
+//
+// AC 4 must not swing on a config typo: a forward captured under
+// `identity` and an oracle captured under `dedupe` measure different
+// downstream stacks, so the gap is meaningless.
+#[test]
+fn compute_gap_rejects_mismatched_aggregation() {
+    let mut baseline = snapshot(BaselineKind::Forward, "fnv1a64:0", vec![], BTreeMap::new());
+    let mut oracle = snapshot(BaselineKind::Oracle, "fnv1a64:0", vec![], BTreeMap::new());
+    baseline.aggregation = "identity".to_owned();
+    oracle.aggregation = "dedupe".to_owned();
+    let result = compute_gap(&baseline, &oracle);
+    assert!(
+        matches!(
+            result,
+            Err(OracleGapError::PipelineConfigMismatch {
+                field: "aggregation",
+                ..
+            })
+        ),
+        "must reject mismatched aggregation; got: {result:?}"
+    );
+}
+
+// T-052-410: compute_gap_rejects_missing_oracle_category
+//
+// A category present on baseline but absent on oracle must surface as
+// a typed error — silent drop would let AC 4 PASS without checking the
+// missing bucket.
+#[test]
+fn compute_gap_rejects_missing_oracle_category() {
+    let baseline_per_cat = {
+        let mut m = BTreeMap::new();
+        m.insert("listing".to_owned(), vec![metric("recall@5", 5, 0.6)]);
+        m.insert(
+            "troubleshooting".to_owned(),
+            vec![metric("recall@5", 5, 0.7)],
+        );
+        m
+    };
+    let oracle_per_cat = {
+        let mut m = BTreeMap::new();
+        m.insert("listing".to_owned(), vec![metric("recall@5", 5, 0.7)]);
+        m
+    };
+    let baseline = snapshot(BaselineKind::Forward, "fnv1a64:0", vec![], baseline_per_cat);
+    let oracle = snapshot(BaselineKind::Oracle, "fnv1a64:0", vec![], oracle_per_cat);
+    let result = compute_gap(&baseline, &oracle);
+    assert!(
+        matches!(
+            result,
+            Err(OracleGapError::MissingOracleCategory { ref category })
+                if category == "troubleshooting"
+        ),
+        "must reject missing oracle category; got: {result:?}"
+    );
+}
+
+// T-052-411: compute_gap_rejects_missing_oracle_metric_within_category
+#[test]
+fn compute_gap_rejects_missing_oracle_metric_within_category() {
+    let baseline_per_cat = {
+        let mut m = BTreeMap::new();
+        m.insert(
+            "listing".to_owned(),
+            vec![metric("recall@5", 5, 0.6), metric("ndcg@10", 10, 0.85)],
+        );
+        m
+    };
+    let oracle_per_cat = {
+        let mut m = BTreeMap::new();
+        m.insert("listing".to_owned(), vec![metric("recall@5", 5, 0.7)]);
+        m
+    };
+    let baseline = snapshot(BaselineKind::Forward, "fnv1a64:0", vec![], baseline_per_cat);
+    let oracle = snapshot(BaselineKind::Oracle, "fnv1a64:0", vec![], oracle_per_cat);
+    let result = compute_gap(&baseline, &oracle);
+    assert!(
+        matches!(
+            result,
+            Err(OracleGapError::MissingOracleMetric { ref scope, ref metric, k: 10 })
+                if scope == "listing" && metric == "ndcg@10"
+        ),
+        "must reject missing oracle metric within category; got: {result:?}"
+    );
+}
+
 // T-052-404: compute_gap_emits_per_metric_diff_against_matching_fixture
 #[test]
 fn compute_gap_emits_per_metric_diff_against_matching_fixture() {

@@ -493,9 +493,20 @@ impl MetricSpec {
     }
 }
 
+/// Modes that load MLX models and would crash under the Codex seatbelt
+/// sandbox. `exit_if_seatbelt` fires for these only — read-only modes
+/// like `oracle-gap` and `compare-baselines` parse committed JSON and
+/// have no MLX dependency, so they should run inside the sandbox.
+const MLX_DEPENDENT_MODES: &[&str] = &[
+    "evaluate",
+    "capture-baseline",
+    "capture-reverse-baseline",
+    "capture-oracle",
+    "verify-baseline",
+];
+
 fn main() -> ExitCode {
     rurico::handle_probe_if_needed();
-    exit_if_seatbelt(env!("CARGO_BIN_NAME"));
 
     let args: Vec<String> = env::args().skip(1).collect();
     let Some(mode) = args.first() else {
@@ -505,6 +516,9 @@ fn main() -> ExitCode {
         );
         return ExitCode::from(EXIT_USAGE);
     };
+    if MLX_DEPENDENT_MODES.contains(&mode.as_str()) {
+        exit_if_seatbelt(env!("CARGO_BIN_NAME"));
+    }
     let kvs: HashMap<String, String> = args[1..]
         .iter()
         .filter_map(|s| s.split_once('=').map(|(k, v)| (k.to_owned(), v.to_owned())))
