@@ -11,6 +11,7 @@
 //! eval_harness capture-baseline output=<path>
 //! eval_harness capture-reverse-baseline output=<path>
 //! eval_harness capture-oracle output=<path>
+//! eval_harness oracle-gap baseline=<path> oracle=<path>
 //! eval_harness verify-baseline baseline=<path>
 //! ```
 //!
@@ -38,6 +39,7 @@ use amici::eval::fixture::{
     EvalDocument, EvalQuery, load_documents, load_known_answers, load_queries,
 };
 use amici::eval::metrics::{MetricResult, bootstrap_ci, mrr_at_k, ndcg_at_k, recall_at_k};
+use amici::eval::oracle_gap::{compute_gap, format_markdown};
 use amici::eval::oracle_pipeline::{OracleError, evaluate_oracle};
 use amici::eval::pipeline::{PipelineConfig, PipelineError, QueryResult, evaluate as run_pipeline};
 use rurico::embed::Embed;
@@ -499,7 +501,7 @@ fn main() -> ExitCode {
     let Some(mode) = args.first() else {
         eprintln!(
             "usage: eval_harness <evaluate|capture-baseline|capture-reverse-baseline|\
-             capture-oracle|verify-baseline|compare-baselines> [key=value...]"
+             capture-oracle|oracle-gap|verify-baseline|compare-baselines> [key=value...]"
         );
         return ExitCode::from(EXIT_USAGE);
     };
@@ -513,6 +515,7 @@ fn main() -> ExitCode {
         "capture-baseline" => run_capture_baseline(&kvs),
         "capture-reverse-baseline" => run_capture_reverse_baseline(&kvs),
         "capture-oracle" => run_capture_oracle(&kvs),
+        "oracle-gap" => run_oracle_gap(&kvs),
         "verify-baseline" => run_verify_baseline(&kvs),
         "compare-baselines" => run_compare_baselines(&kvs),
         other => {
@@ -1331,6 +1334,73 @@ fn run_compare_baselines(kvs: &HashMap<String, String>) -> ExitCode {
     }
     print_comparison_table(&snapshots);
     ExitCode::SUCCESS
+}
+
+/// `oracle-gap baseline=<path> oracle=<path>` — read a Forward baseline
+/// and an Oracle baseline (Issue #52), emit a markdown gap report on
+/// stdout, and exit `EXIT_REGRESSION` if AC 4 is violated (any category
+/// where `oracle.recall@k < baseline.recall@k`).
+fn run_oracle_gap(kvs: &HashMap<String, String>) -> ExitCode {
+    let Some(baseline_raw) = kvs.get("baseline") else {
+        eprintln!("oracle-gap: baseline= argument required");
+        return ExitCode::from(EXIT_USAGE);
+    };
+    let Some(oracle_raw) = kvs.get("oracle") else {
+        eprintln!("oracle-gap: oracle= argument required");
+        return ExitCode::from(EXIT_USAGE);
+    };
+    let baseline_path = match validate_baseline_path(baseline_raw) {
+        Ok(p) => p,
+        Err(msg) => {
+            eprintln!("oracle-gap: baseline= {msg}");
+            return ExitCode::from(EXIT_USAGE);
+        }
+    };
+    let oracle_path = match validate_baseline_path(oracle_raw) {
+        Ok(p) => p,
+        Err(msg) => {
+            eprintln!("oracle-gap: oracle= {msg}");
+            return ExitCode::from(EXIT_USAGE);
+        }
+    };
+    let baseline_snapshot = match read_snapshot(&baseline_path) {
+        Ok(s) => s,
+        Err(msg) => {
+            eprintln!("oracle-gap: baseline= {msg}");
+            return ExitCode::from(EXIT_INFRA);
+        }
+    };
+    let oracle_snapshot = match read_snapshot(&oracle_path) {
+        Ok(s) => s,
+        Err(msg) => {
+            eprintln!("oracle-gap: oracle= {msg}");
+            return ExitCode::from(EXIT_INFRA);
+        }
+    };
+    let gap = match compute_gap(&baseline_snapshot, &oracle_snapshot) {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!("oracle-gap: {e}");
+            return ExitCode::from(EXIT_INFRA);
+        }
+    };
+    println!("{}", format_markdown(&gap));
+    if gap.ac4_violations.is_empty() {
+        ExitCode::SUCCESS
+    } else {
+        eprintln!(
+            "oracle-gap: AC 4 violated by {} per-category recall regression(s)",
+            gap.ac4_violations.len()
+        );
+        ExitCode::from(EXIT_REGRESSION)
+    }
+}
+
+/// Read a `BaselineSnapshot` from `path` as JSON. Centralised so
+/// `oracle-gap` reads both files through the same parse/error path.
+fn read_snapshot(path: &Path) -> Result<BaselineSnapshot, String> {
+    let text = fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    serde_json::from_str(&text).map_err(|e| format!("parse {}: {e}", path.display()))
 }
 
 /// Format `snapshots` as a markdown comparison table on stdout.

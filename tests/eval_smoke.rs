@@ -24,6 +24,38 @@ const REVERSE_BASELINE_PATH: &str = "tests/fixtures/eval/reverse_baseline.json";
 /// Path to the committed full baseline. T-019 verifies against this file.
 const BASELINE_PATH: &str = "tests/fixtures/eval/baseline.json";
 
+/// Path to the committed oracle baseline (Issue #52). T-052-004 compares
+/// it against [`BASELINE_PATH`] via the `oracle-gap` subcommand.
+const ORACLE_BASELINE_PATH: &str = "tests/fixtures/eval/oracle_baseline.json";
+
+// T-052-004: t052_004_oracle_gap_passes_against_committed_fixtures
+// Issue #52 AC 3 + AC 4: `oracle-gap` against the committed baseline.json
+// and oracle_baseline.json must exit 0 (no per-category recall regression)
+// and emit the markdown gap report on stdout. Read-only; no MLX required,
+// so this runs in the default cargo test lane (no #[ignore]).
+#[test]
+fn t052_004_oracle_gap_passes_against_committed_fixtures() {
+    let output = Command::new(env!("CARGO_BIN_EXE_eval_harness"))
+        .args([
+            "oracle-gap",
+            &format!("baseline={BASELINE_PATH}"),
+            &format!("oracle={ORACLE_BASELINE_PATH}"),
+        ])
+        .output()
+        .expect("spawn eval_harness oracle-gap");
+    assert_smoke_success(&output);
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("# Oracle Gap"),
+        "[T-052-004] AC 3: stdout must contain `# Oracle Gap` header, got: {stdout}"
+    );
+    assert!(
+        stdout.contains("PASS"),
+        "[T-052-004] AC 4: committed fixtures must pass the AC 4 gate, got: {stdout}"
+    );
+}
+
 // T-013: t013_identity_fixture_perfect_metrics
 // FR-011: identity_ranker fixture must yield nDCG@10 == 1.0 ∧ Recall@1 == 1.0.
 #[test]

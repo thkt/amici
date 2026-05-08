@@ -59,6 +59,29 @@ The reproducibility contract layers two distinct tolerances:
 
 `baseline.json` carries `schema_version`, `kind`, `model_id`, `model_revision`, `mlx_rs_version`, `fixture_hash`, `aggregation`, `merge_config`, `normalization`, and `captured_with` so drift drivers are explicit. `fixture_hash` is FNV-1a 64-bit over `documents.jsonl + queries.jsonl + known_answers.jsonl`.
 
+## Oracle Mode (Issue #52)
+
+The `oracle` baseline kind quantifies the **search-side ceiling**: what the metrics would look like if Stage 2 always placed every relevant doc at rank 0. Pairs with the `forward` baseline to surface the retrieval-side improvement headroom — Phase 2 priority signal directly aligned with CoSearch (arXiv:2604.17555).
+
+| Aspect | Forward | Oracle |
+| --- | --- | --- |
+| Stage 2 (merge) | `WeightedRrf` | `OracleMerge` (forces relevant doc to rank 0) |
+| Stage 3 (aggregator) | unchanged | unchanged |
+| Stage 4 (rerank) | unchanged | unchanged |
+| Captures | `eval_harness capture-baseline` | `eval_harness capture-oracle` |
+
+**Pattern A vs B**: amici uses **Pattern A** (retrieval-stage Oracle only). Stage 3 aggregation and Stage 4 rerank run against the idealised retrieval, so the gap is interpretable as "improvement available by rebuilding retrieval, holding rerank/aggregation fixed". Pattern B (post-process injection that overrides the final ranking) measures the full pipeline ceiling but cannot tell apart retrieval gain from rerank gain — out of scope for the Phase 2 decision this ADR supports.
+
+**Capture cadence**: rerun `just eval-oracle` whenever the production fixture is reauthored (so `fixture_hash` rolls forward) or rurico's retrieval primitives ship a behaviour change (FTS tokenizer / sqlite-vec ANN / RRF). Skip on rurico bumps that touch only embed or rerank — Stage 2 is unchanged so the oracle gap stays comparable.
+
+**AC 4 gate** (`eval_harness oracle-gap`): for every per-category bucket, `oracle.recall@k ≥ baseline.recall@k`. The gate covers `recall@k` only; `mrr@k` and `ndcg@k` involve reranker score comparisons that can legitimately let a relevant doc slide inside `top-k` after the oracle replaces a stronger natural hit, so flagging those as violations would be a false positive. The gate exits `EXIT_REGRESSION` (1) so CI catches a wiring regression where the oracle inject failed to land in `top-k`.
+
+**What Oracle does NOT measure**:
+
+- Rerank ceiling — the production reranker still scores oracle-injected hits; if the reranker mis-ranks them, the metric reflects that.
+- Aggregation ceiling — Stage 3 aggregators (Identity / MaxChunk / Dedupe / TopKAverage) run unchanged. A bug in aggregation would be visible in both Forward and Oracle and not in the gap.
+- End-to-end product quality — the gap is bounded by metrics that are themselves bounded by the fixture's relevance judgments. A query whose `relevance_map` is sparse or noisy biases the gap downward.
+
 ## Reassessment Triggers
 
 (Inherited from rurico ADR 0003 §Reassessment Triggers — handled in this location going forward.)

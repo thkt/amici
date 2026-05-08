@@ -223,6 +223,34 @@ can write deterministic retry logic.
 > CI pipelines, and parent processes that branch on a specific number must
 > be updated. Announce the change in the CLI's release notes.
 
+### Oracle mode
+
+The eval harness ships an Oracle pipeline that measures how much recall
+the production retrieval is leaving on the table. It works by forcing
+every known-relevant document to rank 0 inside the merge stage, then
+running the rest of the pipeline (aggregation, reranker) unchanged. The
+gap between the normal "forward" baseline and this idealised oracle
+baseline is the search-side improvement headroom.
+
+```sh
+# 1. Capture the oracle baseline (MLX required, Apple Silicon only).
+just eval-oracle
+
+# 2. Compare it with the forward baseline. Read-only, no MLX.
+just eval-oracle-gap
+```
+
+`eval-oracle-gap` emits a markdown report with global and per-category
+gap tables. It exits `1` if any category shows `oracle.recall@k <
+baseline.recall@k` (the oracle path failed to land the relevant doc in
+`top-k` — almost always a wiring regression). Otherwise it exits `0`.
+
+How to read the result: a large positive `recall@k` gap means
+retrieval-side investment (more rerank candidates, query rewriting,
+a learned ranker) has measurable headroom. A near-zero gap means the
+retrieval is already at its ceiling for this fixture, and the next
+quality gain has to come from elsewhere — e.g. extending the fixture.
+
 ## Development
 
 ### Setup
