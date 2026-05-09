@@ -224,17 +224,19 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
 
 /// Serialise `snapshot` as pretty JSON to `path` (atomic write).
 ///
-/// Uses [`atomic_write`] so a partial write never corrupts a committed
-/// baseline file in the git tree.
+/// Delegates to [`super::io::write_json`] so the `BaselineSnapshot`
+/// and `Session` writers share a single atomic-write code path.
 ///
 /// # Errors
 ///
-/// Returns [`BaselineError::Io`] when the destination cannot be created and
-/// [`BaselineError::Serialise`] when JSON encoding fails.
+/// Returns [`BaselineError::Io`] when the destination cannot be
+/// created or when JSON encoding fails — `serde_json` failures are
+/// wrapped as [`io::ErrorKind::Other`] inside [`super::io::write_json`]
+/// before they reach this layer. [`BaselineError::Serialise`] is
+/// retained for forward-compatible callers that wrap their own
+/// `serde_json::Error` directly.
 pub fn write_json(snapshot: &BaselineSnapshot, path: &Path) -> Result<(), BaselineError> {
-    let mut json = serde_json::to_string_pretty(snapshot)?;
-    json.push('\n');
-    atomic_write(path, json.as_bytes())?;
+    super::io::write_json(snapshot, path)?;
     Ok(())
 }
 
