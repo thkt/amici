@@ -55,7 +55,7 @@ Option 1 を採用する。
 
 1. **`Hit@k` メトリクス追加** — `src/eval/metrics.rs` に `hit_at_k()` 関数を追加。`MetricSpec` enum に `Hit1`, `Hit3` variant を追加。`MetricSpec::tolerance` に Hit@k 用の許容値を設定。Bootstrap CI (95%, n=1000, seed=42) で算出。実装は Issue #61。
 
-2. **`replay-first-search` サブコマンド追加** — `src/bin/eval_harness.rs` に新サブコマンドを追加。各 query について Stage 1 (FTS+Vec) + Stage 2 (RRF merge) のみ実行、Stage 3 (aggregation) / Stage 4 (rerank) / Stage 5 (final) は skip。出力は `QueryResult.ranked_hits[0..k]` のみ。実装は Issue #62。
+2. **`replay-first-search` サブコマンド追加** — `src/bin/eval_harness.rs` に新サブコマンドを追加。各 query について Stage 1 (FTS+Vec) + Stage 2 (RRF merge) を実行し、Stage 3 minimum として `MaxChunkAggregator` を適用 (parent-level rollup)、ranking-aware aggregator (`IdentityAggregator` 等) と Stage 4 (rerank) / Stage 5 (final) は skip。chunk-level retrieval 下では Stage 1+2 の出力が `(doc_id, chunk_id)` granularity で混在するため、parent rollup 無しで top-k を切ると Hit@3 が実質「同一 parent の異 chunk 3 件」を返し pgr 記事の "top-k unique docs に relevant が含まれるか" 意味論が壊れる。replay 出力は parent-granular な `QueryResult.ranked_hits[0..k]` (全 entry で `chunk_id == None`、`doc_id` unique) で固定。実装は Issue #62。
 
 3. **Baseline schema 更新** — `BaselineKind` enum に `FirstSearchReplay` variant を追加。`BASELINE_SCHEMA_VERSION` を 1.2 → 1.3 に bump。既存の `Forward` / `Reverse` / `Oracle` baseline には影響なし。
 
@@ -65,7 +65,7 @@ Option 1 を採用する。
 
 - yomu / sae の ranking 実験が complete し、Hit@k で有意な変化 (pgr 記事の +8 pt クラス) が観測されない場合 → benchmark 設計の見直し (fixture multiplicity / first-search 定義の精度)
 - pgr 記事の手法を超えるベンチマークが業界標準化された場合 (例: fully agentic loop benchmark の reproducibility 解決) → Option 3 を再評価
-- replay モードでの実行が forward baseline 比 2-5x の高速化に届かない場合 → Stage 3-5 の skip 漏れ調査
+- replay モードでの実行が forward baseline 比 2-5x の高速化に届かない場合 → Stage 4-5 の skip 漏れ調査 (Stage 3 は MaxChunkAggregator 必須なので skip 対象は Stage 4 / Stage 5 のみ)
 - Hit@k と Recall@k / MRR@k が常に一致した順序で動く場合 → Hit@k の独立な情報量がないと判断、削除を検討
 
 ## References
