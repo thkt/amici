@@ -1,6 +1,6 @@
 # Add pgr-style First-Search Offline Retrieval Benchmark
 
-- Status: proposed
+- Status: accepted
 - Deciders: thkt
 - Date: 2026-05-08
 - Confidence: medium — pgr 記事 (entire.io 2026-05-06) で `MRR` / `Hit@1` / `Hit@3` の感度差は実証済み (fff vs baseline で Hit@1 -8 ポイント、pgr vs baseline で Hit@1 +8 ポイント)。amici の既存 fixture / Bootstrap CI / Oracle pipeline は再利用可能で実装コストは低い。一方、自社プロジェクト (yomu / sae) の ranking 改善でも同等の感度が出るかは要観測。
