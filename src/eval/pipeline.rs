@@ -13,8 +13,8 @@ use bytemuck::cast_slice;
 use rurico::embed::{EMBEDDING_DIMS, Embed, EmbedError};
 use rurico::reranker::{Rerank, RerankerError};
 use rurico::retrieval::{
-    Aggregator, Candidate, CandidateSource, HybridSearchConfig, MergeStrategy, MergedHit,
-    WeightedRrf,
+    Aggregator, Candidate, CandidateSource, HybridSearchConfig, MaxChunkAggregator, MergeStrategy,
+    MergedHit, WeightedRrf,
 };
 use rurico::storage::{
     QueryNormalizationConfig, SanitizeError, ensure_sqlite_vec, normalize_for_fts,
@@ -179,6 +179,68 @@ where
     Ok(results)
 }
 
+/// Run Stage 1+2 over the corpus and apply [`MaxChunkAggregator`] parent
+/// rollup, skipping Stage 3 ranking-aware aggregators and Stage 4 rerank.
+///
+/// Records the agentic-search "first-result quality" indicator (ADR-0003).
+/// Output `ranked_hits` are parent-granular: every entry has
+/// `chunk_id == None` and unique `doc_id` within the top-k window
+/// (FR-007a / BR-007), so the top-k window measures unique parent docs
+/// (pgr "top-k unique docs include relevant" semantics).
+///
+/// Stage 4 (rerank) is unreachable on this path because the signature has
+/// no `reranker` parameter (FR-008 / FR-010 compile-time guard). Stage 3
+/// is fixed to [`MaxChunkAggregator`] — ranking-aware aggregators (e.g.
+/// [`IdentityAggregator`]) are not selectable.
+///
+/// # Errors
+///
+/// See [`PipelineError`] variants — same surface as [`evaluate`] minus
+/// rerank-related errors (no reranker invoked).
+///
+/// [`MaxChunkAggregator`]: rurico::retrieval::MaxChunkAggregator
+/// [`IdentityAggregator`]: rurico::retrieval::IdentityAggregator
+pub fn evaluate_first_search_replay<E>(
+    corpus: &[EvalDocument],
+    queries: &[EvalQuery],
+    embedder: &E,
+    merge_config: &HybridSearchConfig,
+    normalization: &QueryNormalizationConfig,
+    config: &PipelineConfig,
+) -> Result<Vec<QueryResult>, PipelineError>
+where
+    E: Embed,
+{
+    let conn = setup_pipeline_connection(corpus, embedder, normalization)?;
+    let merge_strategy = WeightedRrf::new(merge_config.clone());
+    let aggregator = MaxChunkAggregator;
+
+    let mut results = Vec::with_capacity(queries.len());
+    for query in queries {
+        let started = Instant::now();
+        let merged_hits = run_stage1_plus_2(
+            &conn,
+            query,
+            embedder,
+            &merge_strategy,
+            normalization,
+            config,
+        )?;
+        // Aggregator::aggregate guarantees score-descending output (trait
+        // contract; MaxChunkAggregator's impl sorts unconditionally), so
+        // truncate-after does not silently drop higher-scoring hits.
+        let mut ranked_hits = aggregator.aggregate(&merged_hits);
+        ranked_hits.truncate(config.k);
+        let latency_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+        results.push(QueryResult {
+            query_id: query.id.clone(),
+            ranked_hits,
+            latency_ms,
+        });
+    }
+    Ok(results)
+}
+
 /// Initialise an in-memory SQLite connection, build the eval-harness
 /// schema, and index `corpus` into all three tables.
 ///
@@ -295,6 +357,44 @@ fn index_corpus<E: Embed>(
     Ok(())
 }
 
+/// Run Stage 1 (FTS + vec retrieval) and Stage 2 (RRF merge) for one query.
+///
+/// Composes [`retrieve_fts`] and [`retrieve_vec`] with `merge_strategy.merge()`.
+/// The returned [`MergedHit`] vector reflects the merge strategy's output
+/// verbatim — neither sorted, truncated, nor passed through any Stage 3
+/// aggregator. Callers own post-merge composition (truncate to `k`,
+/// aggregator pass, parent rollup, rerank, etc.).
+///
+/// `pub(super)` so [`run_single_query`] (forward / oracle paths) and
+/// [`evaluate_first_search_replay`] share this helper without forking the
+/// per-query Stage 1+2 wiring.
+///
+/// # Errors
+///
+/// Surfaces [`PipelineError::Sqlite`] / [`PipelineError::Sanitize`] from
+/// FTS retrieval and [`PipelineError::Embed`] / [`PipelineError::Sqlite`]
+/// from vector retrieval.
+pub(super) fn run_stage1_plus_2<E, M>(
+    conn: &Connection,
+    query: &EvalQuery,
+    embedder: &E,
+    merge_strategy: &M,
+    normalization: &QueryNormalizationConfig,
+    config: &PipelineConfig,
+) -> Result<Vec<MergedHit>, PipelineError>
+where
+    E: Embed,
+    M: MergeStrategy,
+{
+    let candidate_limit = config.k * RRF_CANDIDATE_MULTIPLIER;
+    let fts_hits = retrieve_fts(conn, &query.text, candidate_limit, normalization)?;
+    let vec_hits = retrieve_vec(conn, embedder, &query.text, candidate_limit)?;
+    let mut all_candidates = Vec::with_capacity(fts_hits.len() + vec_hits.len());
+    all_candidates.extend(fts_hits);
+    all_candidates.extend(vec_hits);
+    Ok(merge_strategy.merge(&all_candidates))
+}
+
 /// Drive one `EvalQuery` through FTS + vec retrieval, RRF merge, Stage 3
 /// aggregation, and (when supplied) reranker rescoring.
 ///
@@ -319,13 +419,8 @@ where
     A: Aggregator,
     M: MergeStrategy,
 {
-    let candidate_limit = config.k * RRF_CANDIDATE_MULTIPLIER;
-    let fts_hits = retrieve_fts(conn, &query.text, candidate_limit, normalization)?;
-    let vec_hits = retrieve_vec(conn, embedder, &query.text, candidate_limit)?;
-    let mut all_candidates = Vec::with_capacity(fts_hits.len() + vec_hits.len());
-    all_candidates.extend(fts_hits);
-    all_candidates.extend(vec_hits);
-    let merged_hits = merge_strategy.merge(&all_candidates);
+    let merged_hits =
+        run_stage1_plus_2(conn, query, embedder, merge_strategy, normalization, config)?;
 
     // Aggregator::aggregate guarantees score-descending output (see trait
     // doc), so truncate-then-rerank does not silently drop higher-scoring
@@ -507,18 +602,19 @@ fn apply_reranker<R: Rerank>(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet};
 
     use rurico::embed::{MockChunkedEmbedder, MockEmbedder};
     use rurico::reranker::MockReranker;
     use rurico::retrieval::{
-        HybridSearchConfig, IdentityAggregator, MaxChunkAggregator, MergedHit,
+        HybridSearchConfig, IdentityAggregator, MaxChunkAggregator, MergedHit, WeightedRrf,
     };
     use rurico::storage::QueryNormalizationConfig;
 
-    use super::{PipelineConfig, evaluate};
+    use super::{
+        PipelineConfig, evaluate, evaluate_first_search_replay, run_stage1_plus_2,
+        setup_pipeline_connection,
+    };
     use crate::eval::fixture::{EvalDocument, EvalQuery};
 
     /// Build an [`EvalDocument`] with stub title / source. The body carries
@@ -781,6 +877,395 @@ mod tests {
              max_chunk_len={} identity_len={}",
             max_chunk_result[0].ranked_hits.len(),
             identity_result[0].ranked_hits.len()
+        );
+    }
+
+    // T-062-001: run_stage1_plus_2_returns_merged_hits_for_mock_corpus
+    //
+    // FR-001 / FR-002: helper composes retrieve_fts + retrieve_vec → merge_strategy.merge.
+    // Indexed corpus + valid query → non-empty Vec<MergedHit>.
+    #[test]
+    fn run_stage1_plus_2_returns_merged_hits_for_mock_corpus() {
+        let corpus = vec![
+            make_document("d1", "alpha document about retrieval"),
+            make_document("d2", "beta document about ranking"),
+            make_document("d3", "gamma document about indexing"),
+        ];
+        let query = make_query("q1", "alpha retrieval", "d1");
+        let embedder = MockEmbedder::default();
+        let merge_strategy = WeightedRrf::new(HybridSearchConfig::default());
+        let normalization = QueryNormalizationConfig::default();
+        let config = PipelineConfig { k: 5 };
+
+        let conn = setup_pipeline_connection(&corpus, &embedder, &normalization)
+            .expect("setup must succeed for MockEmbedder corpus");
+        let merged = run_stage1_plus_2(
+            &conn,
+            &query,
+            &embedder,
+            &merge_strategy,
+            &normalization,
+            &config,
+        )
+        .expect("Stage 1+2 helper must succeed");
+
+        assert!(
+            !merged.is_empty(),
+            "FR-001/FR-002: indexed corpus + valid query → run_stage1_plus_2 must \
+             return non-empty Vec<MergedHit>, got empty"
+        );
+    }
+
+    // T-062-002: run_stage1_plus_2_does_not_truncate_or_sort_or_aggregate
+    //
+    // FR-003: helper returns merge_strategy.merge() output verbatim. Verified by
+    //   1. chunk-level fixture (MockChunkedEmbedder::new(2)) → at least one
+    //      MergedHit retains chunk_id=Some(_); a Stage 3 aggregator (e.g.
+    //      MaxChunkAggregator) would collapse all chunk_ids to None.
+    //   2. merged.len() > config.k → no truncate to k.
+    #[test]
+    fn run_stage1_plus_2_does_not_truncate_or_sort_or_aggregate() {
+        let corpus = vec![
+            make_document("d1", "alpha document about retrieval"),
+            make_document("d2", "beta document about ranking"),
+            make_document("d3", "gamma document about indexing"),
+        ];
+        let query = make_query("q1", "alpha retrieval", "d1");
+        let embedder = MockChunkedEmbedder::new(2);
+        let merge_strategy = WeightedRrf::new(HybridSearchConfig::default());
+        let normalization = QueryNormalizationConfig::default();
+        let config = PipelineConfig { k: 2 };
+
+        let conn = setup_pipeline_connection(&corpus, &embedder, &normalization)
+            .expect("setup must succeed for chunk-level corpus");
+        let merged = run_stage1_plus_2(
+            &conn,
+            &query,
+            &embedder,
+            &merge_strategy,
+            &normalization,
+            &config,
+        )
+        .expect("Stage 1+2 helper must succeed");
+
+        let chunk_id_some_count = merged.iter().filter(|h| h.chunk_id.is_some()).count();
+        assert!(
+            chunk_id_some_count > 0,
+            "FR-003: helper must NOT invoke any Stage 3 aggregator. \
+             A Stage 3 aggregator would collapse chunk_id to None, but \
+             retrieved chunk-level hits should be preserved verbatim. \
+             Got {chunk_id_some_count} hits with chunk_id=Some, merged={merged:?}"
+        );
+
+        // candidate_limit = k * RRF_CANDIDATE_MULTIPLIER (= 2 * 3 = 6); with
+        // 3 docs × 2 chunks per doc, vec retrieval contributes ≤ 6 hits.
+        // After merge, length should exceed config.k (= 2) — proving the
+        // helper did not truncate.
+        assert!(
+            merged.len() > config.k,
+            "FR-003: helper must NOT truncate to k={}, got merged.len()={}",
+            config.k,
+            merged.len()
+        );
+    }
+
+    // T-062-004: evaluate_first_search_replay_returns_one_result_per_query
+    //
+    // FR-006 / FR-007: Stage 1+2 + parent rollup → exactly one
+    // QueryResult per EvalQuery, in the same order as `queries`.
+    #[test]
+    fn evaluate_first_search_replay_returns_one_result_per_query() {
+        let corpus = vec![
+            make_document("d1", "alpha document about retrieval"),
+            make_document("d2", "beta document about ranking"),
+            make_document("d3", "gamma document about indexing"),
+        ];
+        let queries = vec![
+            make_query("q1", "alpha retrieval", "d1"),
+            make_query("q2", "beta ranking", "d2"),
+        ];
+        let embedder = MockEmbedder::default();
+        let merge_config = HybridSearchConfig::default();
+        let normalization = QueryNormalizationConfig::default();
+        let config = PipelineConfig { k: 3 };
+
+        let results = evaluate_first_search_replay(
+            &corpus,
+            &queries,
+            &embedder,
+            &merge_config,
+            &normalization,
+            &config,
+        )
+        .expect("replay must succeed");
+
+        assert_eq!(
+            results.len(),
+            queries.len(),
+            "FR-006/FR-007: one QueryResult per query, got {} results for {} queries",
+            results.len(),
+            queries.len()
+        );
+        assert_eq!(
+            results[0].query_id, "q1",
+            "QueryResult order must mirror input queries"
+        );
+        assert_eq!(results[1].query_id, "q2", "QueryResult order preserved");
+    }
+
+    // T-062-005 / T-062-006: evaluate_first_search_replay_signature_excludes_aggregator_and_reranker
+    //
+    // FR-008 / FR-010 compile-time guard: the signature has neither an
+    // `Aggregator` nor a `Reranker` parameter — verified by the call
+    // below compiling without either. A single passing call site pins
+    // the entire parameter list, so T-062-005 (no aggregator) and
+    // T-062-006 (no reranker) collapse into one test.
+    #[test]
+    fn evaluate_first_search_replay_signature_excludes_aggregator_and_reranker() {
+        let corpus = vec![make_document("d1", "alpha")];
+        let queries = vec![make_query("q1", "alpha", "d1")];
+        let embedder = MockEmbedder::default();
+        let merge_config = HybridSearchConfig::default();
+        let normalization = QueryNormalizationConfig::default();
+        let config = PipelineConfig { k: 1 };
+
+        let _ = evaluate_first_search_replay(
+            &corpus,
+            &queries,
+            &embedder,
+            &merge_config,
+            &normalization,
+            &config,
+        )
+        .expect("replay must succeed");
+    }
+
+    // T-062-007: evaluate_first_search_replay_results_are_score_descending
+    //
+    // FR-007 / BR-005: ranked_hits sorted by descending score. The order
+    // comes from Aggregator::aggregate's trait contract (MaxChunkAggregator
+    // sorts unconditionally), so no explicit sort is needed in the replay
+    // path.
+    #[test]
+    fn evaluate_first_search_replay_results_are_score_descending() {
+        let corpus = vec![
+            make_document("d1", "alpha document about retrieval"),
+            make_document("d2", "beta document about ranking"),
+            make_document("d3", "gamma document about indexing"),
+            make_document("d4", "delta document about scoring"),
+            make_document("d5", "epsilon document about evaluation"),
+        ];
+        let queries = vec![make_query("q1", "alpha retrieval", "d1")];
+        let embedder = MockChunkedEmbedder::new(2);
+        let merge_config = HybridSearchConfig::default();
+        let normalization = QueryNormalizationConfig::default();
+        let config = PipelineConfig { k: 5 };
+
+        let results = evaluate_first_search_replay(
+            &corpus,
+            &queries,
+            &embedder,
+            &merge_config,
+            &normalization,
+            &config,
+        )
+        .expect("replay must succeed");
+
+        let scores: Vec<f64> = results[0].ranked_hits.iter().map(|h| h.score).collect();
+        let mut prev = f64::INFINITY;
+        for (i, score) in scores.iter().enumerate() {
+            assert!(
+                *score <= prev,
+                "BR-005: ranked_hits must be score-descending; \
+                 hit {i} has score {score} > prev {prev}, full scores={scores:?}"
+            );
+            prev = *score;
+        }
+    }
+
+    // T-062-007a: evaluate_first_search_replay_results_have_unique_doc_ids
+    //
+    // FR-007a / BR-007: parent rollup collapses sibling chunks of the same
+    // doc_id to a single MergedHit (max score), so the top-k window
+    // measures unique parent docs (pgr "top-k unique docs include
+    // relevant" semantics, ADR-0003 第 2 deliverable).
+    #[test]
+    fn evaluate_first_search_replay_results_have_unique_doc_ids() {
+        let corpus = vec![
+            make_document("d1", "alpha document about retrieval"),
+            make_document("d2", "beta document about ranking"),
+            make_document("d3", "gamma document about indexing"),
+        ];
+        let queries = vec![make_query("q1", "alpha retrieval", "d1")];
+        let embedder = MockChunkedEmbedder::new(2);
+        let merge_config = HybridSearchConfig::default();
+        let normalization = QueryNormalizationConfig::default();
+        let config = PipelineConfig { k: 5 };
+
+        let results = evaluate_first_search_replay(
+            &corpus,
+            &queries,
+            &embedder,
+            &merge_config,
+            &normalization,
+            &config,
+        )
+        .expect("replay must succeed");
+
+        let doc_ids: Vec<&str> = results[0]
+            .ranked_hits
+            .iter()
+            .map(|h| h.doc_id.as_str())
+            .collect();
+        let unique: HashSet<&str> = doc_ids.iter().copied().collect();
+        assert_eq!(
+            doc_ids.len(),
+            unique.len(),
+            "FR-007a/BR-007: ranked_hits must have unique doc_ids after \
+             parent rollup; got duplicates in {doc_ids:?}"
+        );
+    }
+
+    // T-062-007b: evaluate_first_search_replay_results_have_chunk_id_none
+    //
+    // BR-007: parent rollup post-condition — every entry has
+    // `chunk_id == None`. MaxChunkAggregator strips chunk_id when
+    // collapsing siblings; replay path must preserve that invariant
+    // through truncate-to-k.
+    #[test]
+    fn evaluate_first_search_replay_results_have_chunk_id_none() {
+        let corpus = vec![
+            make_document("d1", "alpha document about retrieval"),
+            make_document("d2", "beta document about ranking"),
+            make_document("d3", "gamma document about indexing"),
+        ];
+        let queries = vec![make_query("q1", "alpha retrieval", "d1")];
+        let embedder = MockChunkedEmbedder::new(2);
+        let merge_config = HybridSearchConfig::default();
+        let normalization = QueryNormalizationConfig::default();
+        let config = PipelineConfig { k: 5 };
+
+        let results = evaluate_first_search_replay(
+            &corpus,
+            &queries,
+            &embedder,
+            &merge_config,
+            &normalization,
+            &config,
+        )
+        .expect("replay must succeed");
+
+        assert!(
+            results[0].ranked_hits.iter().all(|h| h.chunk_id.is_none()),
+            "BR-007: parent rollup must strip chunk_id; got {:?}",
+            results[0].ranked_hits
+        );
+    }
+
+    // T-062-008: evaluate_first_search_replay_truncates_to_k
+    //
+    // FR-007: caller truncates to config.k after rollup + sort.
+    #[test]
+    fn evaluate_first_search_replay_truncates_to_k() {
+        let corpus = vec![
+            make_document("d1", "alpha document about retrieval"),
+            make_document("d2", "beta document about ranking"),
+            make_document("d3", "gamma document about indexing"),
+            make_document("d4", "delta document about scoring"),
+            make_document("d5", "epsilon document about evaluation"),
+        ];
+        let queries = vec![make_query("q1", "alpha retrieval", "d1")];
+        let embedder = MockEmbedder::default();
+        let merge_config = HybridSearchConfig::default();
+        let normalization = QueryNormalizationConfig::default();
+        let config = PipelineConfig { k: 2 };
+
+        let results = evaluate_first_search_replay(
+            &corpus,
+            &queries,
+            &embedder,
+            &merge_config,
+            &normalization,
+            &config,
+        )
+        .expect("replay must succeed");
+
+        assert!(
+            results[0].ranked_hits.len() <= config.k,
+            "FR-007: replay must truncate to k={}, got len={}",
+            config.k,
+            results[0].ranked_hits.len()
+        );
+    }
+
+    // T-062-009: evaluate_first_search_replay_records_per_query_latency
+    //
+    // FR-009: per-query latency_ms is recorded on QueryResult.
+    // latency_ms is u64 by type, so its presence on QueryResult is the
+    // FR-009 signal — referencing the field below proves it exists.
+    #[test]
+    fn evaluate_first_search_replay_records_per_query_latency() {
+        let corpus = vec![make_document("d1", "alpha")];
+        let queries = vec![make_query("q1", "alpha", "d1")];
+        let embedder = MockEmbedder::default();
+        let merge_config = HybridSearchConfig::default();
+        let normalization = QueryNormalizationConfig::default();
+        let config = PipelineConfig { k: 1 };
+
+        let results = evaluate_first_search_replay(
+            &corpus,
+            &queries,
+            &embedder,
+            &merge_config,
+            &normalization,
+            &config,
+        )
+        .expect("replay must succeed");
+
+        let _latency: u64 = results[0].latency_ms;
+    }
+
+    // T-062-010: evaluate_first_search_replay_does_not_invoke_identity_aggregator
+    //
+    // FR-008 / BR-008: replay path uses MaxChunkAggregator only. Under
+    // chunk-level retrieval (MockChunkedEmbedder::new(2)),
+    // IdentityAggregator would surface per-chunk hits (chunk_id=Some).
+    // Replay's MaxChunkAggregator must collapse them — every result has
+    // chunk_id=None — proving Identity (or any aggregator that preserves
+    // chunk_id) was not invoked.
+    #[test]
+    fn evaluate_first_search_replay_does_not_invoke_identity_aggregator() {
+        let corpus = vec![
+            make_document("d1", "alpha document about retrieval"),
+            make_document("d2", "beta document about ranking"),
+        ];
+        let queries = vec![make_query("q1", "alpha retrieval", "d1")];
+        let embedder = MockChunkedEmbedder::new(2);
+        let merge_config = HybridSearchConfig::default();
+        let normalization = QueryNormalizationConfig::default();
+        let config = PipelineConfig { k: 5 };
+
+        let results = evaluate_first_search_replay(
+            &corpus,
+            &queries,
+            &embedder,
+            &merge_config,
+            &normalization,
+            &config,
+        )
+        .expect("replay must succeed");
+
+        let chunk_id_some_count = results[0]
+            .ranked_hits
+            .iter()
+            .filter(|h| h.chunk_id.is_some())
+            .count();
+        assert_eq!(
+            chunk_id_some_count, 0,
+            "FR-008/BR-008: replay must NOT invoke IdentityAggregator (or \
+             any aggregator that preserves chunk_id). Got \
+             {chunk_id_some_count} hits with chunk_id=Some, ranked_hits={:?}",
+            results[0].ranked_hits
         );
     }
 }

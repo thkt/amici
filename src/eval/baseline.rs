@@ -42,18 +42,27 @@ pub const UNINFORMATIVE_HALF_WIDTH: f64 = 0.10;
 ///   Forward and Reverse files round-trip unchanged. The bump lets
 ///   `oracle-gap` refuse to compare snapshots produced under different
 ///   semantic versions.
-pub const BASELINE_SCHEMA_VERSION: &str = "1.2";
+/// - `1.3`: First-search replay baseline kind (Issue #62).
+///   [`BaselineKind`] gained a `FirstSearchReplay` variant; older
+///   harnesses cannot deserialise a
+///   `first_search_replay_baseline.json` (variant unknown to their
+///   enum), but Forward, Reverse, and Oracle files round-trip unchanged.
+///   The bump lets `verify-baseline` refuse to compare a Forward
+///   baseline against a `replay-first-search` capture by mistake.
+pub const BASELINE_SCHEMA_VERSION: &str = "1.3";
 
-/// Discriminator distinguishing forward (`capture-baseline`) from reverse
-/// (`capture-reverse-baseline`) and oracle (`capture-oracle`) baseline files.
+/// Discriminator distinguishing forward (`capture-baseline`), reverse
+/// (`capture-reverse-baseline`), oracle (`capture-oracle`), and
+/// first-search replay (`replay-first-search`) baseline files.
 ///
-/// All three files share the [`BASELINE_SCHEMA_VERSION`] envelope; consumers
+/// All four files share the [`BASELINE_SCHEMA_VERSION`] envelope; consumers
 /// read `kind` first to pick the right body shape rather than inferring
-/// from the presence of fields. `Forward` and `Oracle` share the
-/// [`BaselineSnapshot`] body shape — the discriminator distinguishes the
-/// production-ranker capture from the retrieval-ceiling capture so
-/// `oracle-gap` (Issue #52) can refuse to compare a Forward against a
-/// Forward by mistake.
+/// from the presence of fields. `Forward`, `Oracle`, and `FirstSearchReplay`
+/// share the [`BaselineSnapshot`] body shape — the discriminator
+/// distinguishes production-ranker, retrieval-ceiling, and Stage 1+2-only
+/// captures so `oracle-gap` (Issue #52) and `verify-baseline` (Issue #62)
+/// can refuse to compare snapshots produced under different semantic
+/// modes by mistake.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BaselineKind {
@@ -69,6 +78,16 @@ pub enum BaselineKind {
     /// from `Forward` is that Stage 2 forced every relevance_map doc to
     /// rank 0 so Stage 3 + Stage 4 ran against an idealised retrieval.
     Oracle,
+    /// First-search replay baseline produced by `replay-first-search`
+    /// (Issue #62). Body matches [`BaselineSnapshot`]; Stage 1+2 produce
+    /// the merged hits, [`MaxChunkAggregator`] performs parent-level
+    /// rollup, and Stage 4 (rerank) is skipped. Records the agentic-search
+    /// "first-result quality" indicator (ADR-0003) so downstream consumers
+    /// can isolate ranking-strategy sensitivity from aggregator / reranker
+    /// effects.
+    ///
+    /// [`MaxChunkAggregator`]: rurico::retrieval::MaxChunkAggregator
+    FirstSearchReplay,
 }
 
 /// Frozen baseline produced by `eval_harness capture-baseline` and verified
@@ -398,6 +417,106 @@ mod tests {
             BaselineKind::Forward,
             "committed baseline.json must declare kind=forward"
         );
+    }
+
+    // T-062-011 / T-062-015: baseline_kind_first_search_replay_serialises_as_snake_case
+    //
+    // FR-012: BaselineKind::FirstSearchReplay round-trips through serde_json
+    // as the snake_case label "first_search_replay". Pinning the wire format
+    // guards against a future variant rename silently breaking committed
+    // first_search_replay_baseline.json files. A serde-attribute regression
+    // (e.g. dropping `rename_all = "snake_case"`) would break both serialize
+    // and deserialize together, so wire-format pin and enum-level round-trip
+    // collapse into one test (mirrors T-052-301 for Oracle).
+    #[test]
+    fn baseline_kind_first_search_replay_serialises_as_snake_case() {
+        let json = serde_json::to_string(&BaselineKind::FirstSearchReplay).expect("serialise");
+        assert_eq!(
+            json, "\"first_search_replay\"",
+            "FR-012: FirstSearchReplay variant must serialise to \"first_search_replay\""
+        );
+        let parsed: BaselineKind = serde_json::from_str(&json).expect("round-trip");
+        assert_eq!(parsed, BaselineKind::FirstSearchReplay);
+    }
+
+    // T-062-012: baseline_snapshot_round_trips_with_first_search_replay_kind
+    //
+    // FR-013: BaselineSnapshot envelope round-trips with
+    // `kind=FirstSearchReplay`, proving the new variant shares Forward /
+    // Oracle's body shape and `replay-first-search` can reuse `write_json`
+    // without forking the serialisation path. `aggregation="none"` is the
+    // BR-003 marker for "Stage 3 ran MaxChunkAggregator only".
+    #[test]
+    fn baseline_snapshot_round_trips_with_first_search_replay_kind() {
+        let snap = BaselineSnapshot {
+            schema_version: BASELINE_SCHEMA_VERSION.to_owned(),
+            kind: BaselineKind::FirstSearchReplay,
+            captured_with: "eval_harness replay-first-search".to_owned(),
+            timestamp: "epoch:42".to_owned(),
+            model_id: "test/model".to_owned(),
+            model_revision: "rev".to_owned(),
+            mlx_rs_version: "0.0.0".to_owned(),
+            fixture_hash: "fnv1a64:0".to_owned(),
+            aggregation: "none".to_owned(),
+            merge_config: HybridSearchConfig::default(),
+            normalization: pre_phase_5_disabled(),
+            global: vec![],
+            per_category: BTreeMap::new(),
+            latency_p50_ms: 0.0,
+            latency_p95_ms: 0.0,
+        };
+        let json = serde_json::to_string(&snap).expect("serialise");
+        let parsed: BaselineSnapshot = serde_json::from_str(&json).expect("round-trip");
+        assert_eq!(parsed.kind, BaselineKind::FirstSearchReplay);
+        assert_eq!(parsed.captured_with, "eval_harness replay-first-search");
+        assert_eq!(
+            parsed.aggregation, "none",
+            "BR-003: aggregation marker is \"none\" for FirstSearchReplay"
+        );
+    }
+
+    // T-062-013: baseline_schema_version_is_1_3
+    //
+    // FR-014: BASELINE_SCHEMA_VERSION bumped to "1.3" so verify-baseline
+    // refuses 1.2 stamps via EXIT_REGRESSION (silent skip would mask
+    // FirstSearchReplay readiness).
+    #[test]
+    fn baseline_schema_version_is_1_3() {
+        assert_eq!(
+            BASELINE_SCHEMA_VERSION, "1.3",
+            "FR-014: schema must be 1.3 to gate stale 1.2 baselines"
+        );
+    }
+
+    // T-062-014: committed_baselines_deserialize_under_schema_1_3
+    //
+    // FR-014 / AC-6: every committed baseline file (forward / oracle /
+    // first-search replay) deserialises cleanly under schema 1.3. Pinning
+    // the three-file invariant in a single test surfaces a stale fixture
+    // (e.g. one regenerated under a different schema) in CI before
+    // verify-baseline hits it at runtime.
+    #[test]
+    fn committed_baselines_deserialize_under_schema_1_3() {
+        let fixture_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/eval");
+        for (name, expected_kind) in [
+            ("baseline.json", BaselineKind::Forward),
+            ("oracle_baseline.json", BaselineKind::Oracle),
+            (
+                "first_search_replay_baseline.json",
+                BaselineKind::FirstSearchReplay,
+            ),
+        ] {
+            let path = fixture_dir.join(name);
+            let text = fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+            let parsed: BaselineSnapshot = serde_json::from_str(&text)
+                .unwrap_or_else(|e| panic!("{name} must deserialise under schema 1.3 ({e})"));
+            assert_eq!(parsed.schema_version, "1.3", "{name} schema must be 1.3");
+            assert_eq!(
+                parsed.kind, expected_kind,
+                "{name} kind must be {expected_kind:?}"
+            );
+        }
     }
 
     // T-022: atomic_write_replaces_destination_on_each_call

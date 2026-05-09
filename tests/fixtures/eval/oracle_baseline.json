@@ -1,8 +1,8 @@
 {
-  "schema_version": "1.2",
+  "schema_version": "1.3",
   "kind": "oracle",
   "captured_with": "eval_harness capture-oracle",
-  "timestamp": "epoch:1778271389",
+  "timestamp": "epoch:1778316425",
   "model_id": "cl-nagoya/ruri-v3-310m",
   "model_revision": "pinned-via-rurico-embed-cache",
   "mlx_rs_version": "0.25",
@@ -40,9 +40,9 @@
     {
       "name": "recall@5",
       "k": 5,
-      "point_estimate": 0.7185515873015874,
-      "ci_lower": 0.6878968253968254,
-      "ci_upper": 0.7495039682539681,
+      "point_estimate": 0.7170634920634922,
+      "ci_lower": 0.6876984126984127,
+      "ci_upper": 0.7489087301587302,
       "uninformative": false
     },
     {
@@ -64,9 +64,9 @@
     {
       "name": "ndcg@10",
       "k": 10,
-      "point_estimate": 0.9475268057575891,
-      "ci_lower": 0.9377598165614695,
-      "ci_upper": 0.9555558053772821,
+      "point_estimate": 0.9477642985697524,
+      "ci_lower": 0.9379680269041076,
+      "ci_upper": 0.9557758299624382,
       "uninformative": false
     }
   ],
@@ -115,9 +115,9 @@
       {
         "name": "ndcg@10",
         "k": 10,
-        "point_estimate": 0.9569265217686284,
-        "ci_lower": 0.9391914260511298,
-        "ci_upper": 0.9736789700043081,
+        "point_estimate": 0.9570131387426085,
+        "ci_lower": 0.9391914260511297,
+        "ci_upper": 0.9739230629079416,
         "uninformative": false
       }
     ],
@@ -165,8 +165,8 @@
       {
         "name": "ndcg@10",
         "k": 10,
-        "point_estimate": 0.9505880085302805,
-        "ci_lower": 0.9343798876650027,
+        "point_estimate": 0.9506746255042603,
+        "ci_lower": 0.9344869648048872,
         "ci_upper": 0.9662463831054537,
         "uninformative": false
       }
@@ -215,9 +215,9 @@
       {
         "name": "ndcg@10",
         "k": 10,
-        "point_estimate": 0.9385225697523962,
-        "ci_lower": 0.9168675056567677,
-        "ci_upper": 0.9578637210311838,
+        "point_estimate": 0.9384380314139351,
+        "ci_lower": 0.9168296230632106,
+        "ci_upper": 0.9577487356809053,
         "uninformative": false
       }
     ],
@@ -315,9 +315,9 @@
       {
         "name": "ndcg@10",
         "k": 10,
-        "point_estimate": 0.9222622532390031,
-        "ci_lower": 0.8735235642004637,
-        "ci_upper": 0.9631790103705432,
+        "point_estimate": 0.9237492963270287,
+        "ci_lower": 0.8747037724359266,
+        "ci_upper": 0.9644899640806488,
         "uninformative": false
       }
     ],
@@ -365,9 +365,9 @@
       {
         "name": "ndcg@10",
         "k": 10,
-        "point_estimate": 0.932948166458314,
-        "ci_lower": 0.9150871653619601,
-        "ci_upper": 0.9518346130876413,
+        "point_estimate": 0.9329165850531231,
+        "ci_lower": 0.915233881430269,
+        "ci_upper": 0.9517330588944153,
         "uninformative": false
       }
     ],
@@ -391,8 +391,8 @@
       {
         "name": "recall@5",
         "k": 5,
-        "point_estimate": 0.6976190476190476,
-        "ci_lower": 0.6333333333333334,
+        "point_estimate": 0.6857142857142857,
+        "ci_lower": 0.6095238095238096,
         "ci_upper": 0.7619047619047619,
         "uninformative": false
       },
@@ -415,9 +415,9 @@
       {
         "name": "ndcg@10",
         "k": 10,
-        "point_estimate": 0.9514431171772477,
-        "ci_lower": 0.9338896690772103,
-        "ci_upper": 0.9676585548569386,
+        "point_estimate": 0.9516561634018718,
+        "ci_lower": 0.9338328326078263,
+        "ci_upper": 0.9674186362264731,
         "uninformative": false
       }
     ],
@@ -465,13 +465,13 @@
       {
         "name": "ndcg@10",
         "k": 10,
-        "point_estimate": 0.9673456423678749,
-        "ci_lower": 0.949941847757764,
-        "ci_upper": 0.9813843255296133,
+        "point_estimate": 0.9674883813482223,
+        "ci_lower": 0.9500444914133921,
+        "ci_upper": 0.9815270645099607,
         "uninformative": false
       }
     ]
   },
-  "latency_p50_ms": 1735.0,
-  "latency_p95_ms": 1975.0
+  "latency_p50_ms": 1849.0,
+  "latency_p95_ms": 2489.0
 }

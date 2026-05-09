@@ -1,13 +1,13 @@
 {
   "schema_version": "1.3",
-  "kind": "forward",
-  "captured_with": "eval_harness capture-baseline",
-  "timestamp": "epoch:1778316144",
+  "kind": "first_search_replay",
+  "captured_with": "eval_harness replay-first-search",
+  "timestamp": "epoch:1778315861",
   "model_id": "cl-nagoya/ruri-v3-310m",
   "model_revision": "pinned-via-rurico-embed-cache",
   "mlx_rs_version": "0.25",
   "fixture_hash": "fnv1a64:88afbfc4e99e0a84",
-  "aggregation": "identity",
+  "aggregation": "none",
   "merge_config": {
     "rrf_k": 60.0,
     "source_weights": {
@@ -24,8 +24,8 @@
     {
       "name": "hit@1",
       "k": 1,
-      "point_estimate": 1.0,
-      "ci_lower": 1.0,
+      "point_estimate": 0.9940476190476191,
+      "ci_lower": 0.9821428571428571,
       "ci_upper": 1.0,
       "uninformative": false
     },
@@ -40,9 +40,9 @@
     {
       "name": "recall@5",
       "k": 5,
-      "point_estimate": 0.6299603174603176,
-      "ci_lower": 0.5985119047619046,
-      "ci_upper": 0.6635912698412697,
+      "point_estimate": 0.5804563492063493,
+      "ci_lower": 0.549702380952381,
+      "ci_upper": 0.6142857142857143,
       "uninformative": false
     },
     {
@@ -56,17 +56,17 @@
     {
       "name": "mrr@10",
       "k": 10,
-      "point_estimate": 1.0,
-      "ci_lower": 1.0,
+      "point_estimate": 0.9970238095238095,
+      "ci_lower": 0.9910714285714286,
       "ci_upper": 1.0,
       "uninformative": false
     },
     {
       "name": "ndcg@10",
       "k": 10,
-      "point_estimate": 0.8927152322843769,
-      "ci_lower": 0.8758959682081754,
-      "ci_upper": 0.9060020209389352,
+      "point_estimate": 0.886043807135979,
+      "ci_lower": 0.8706501310840375,
+      "ci_upper": 0.8996254653009721,
       "uninformative": false
     }
   ],
@@ -91,9 +91,9 @@
       {
         "name": "recall@5",
         "k": 5,
-        "point_estimate": 0.6095238095238096,
-        "ci_lower": 0.5119047619047619,
-        "ci_upper": 0.7047619047619047,
+        "point_estimate": 0.5380952380952382,
+        "ci_lower": 0.44761904761904764,
+        "ci_upper": 0.6309523809523809,
         "uninformative": false
       },
       {
@@ -115,9 +115,9 @@
       {
         "name": "ndcg@10",
         "k": 10,
-        "point_estimate": 0.898389793154694,
-        "ci_lower": 0.8564482005383541,
-        "ci_upper": 0.9325460147776281,
+        "point_estimate": 0.8773701966503167,
+        "ci_lower": 0.8367313073222894,
+        "ci_upper": 0.9113358825260621,
         "uninformative": false
       }
     ],
@@ -141,9 +141,9 @@
       {
         "name": "recall@5",
         "k": 5,
-        "point_estimate": 0.5682539682539682,
-        "ci_lower": 0.4888888888888888,
-        "ci_upper": 0.6420634920634921,
+        "point_estimate": 0.49920634920634926,
+        "ci_lower": 0.42936507936507934,
+        "ci_upper": 0.5722222222222223,
         "uninformative": false
       },
       {
@@ -165,9 +165,9 @@
       {
         "name": "ndcg@10",
         "k": 10,
-        "point_estimate": 0.8703370297846807,
-        "ci_lower": 0.8326182473316168,
-        "ci_upper": 0.9046574980745109,
+        "point_estimate": 0.8573090425535389,
+        "ci_lower": 0.8239297054165885,
+        "ci_upper": 0.8902545227161589,
         "uninformative": false
       }
     ],
@@ -191,9 +191,9 @@
       {
         "name": "recall@5",
         "k": 5,
-        "point_estimate": 0.5801587301587302,
-        "ci_lower": 0.4888888888888888,
-        "ci_upper": 0.6753968253968254,
+        "point_estimate": 0.5587301587301587,
+        "ci_lower": 0.4746031746031746,
+        "ci_upper": 0.6468253968253969,
         "uninformative": false
       },
       {
@@ -215,9 +215,9 @@
       {
         "name": "ndcg@10",
         "k": 10,
-        "point_estimate": 0.8886513595583997,
-        "ci_lower": 0.8513403560181254,
-        "ci_upper": 0.9244545423942179,
+        "point_estimate": 0.8899405590314363,
+        "ci_lower": 0.8594877459327235,
+        "ci_upper": 0.9205836590090851,
         "uninformative": false
       }
     ],
@@ -241,9 +241,9 @@
       {
         "name": "recall@5",
         "k": 5,
-        "point_estimate": 0.6865079365079364,
-        "ci_lower": 0.5992063492063492,
-        "ci_upper": 0.765873015873016,
+        "point_estimate": 0.619047619047619,
+        "ci_lower": 0.5396825396825398,
+        "ci_upper": 0.7063492063492064,
         "uninformative": false
       },
       {
@@ -265,9 +265,9 @@
       {
         "name": "ndcg@10",
         "k": 10,
-        "point_estimate": 0.9183631980078937,
-        "ci_lower": 0.8937393353685754,
-        "ci_upper": 0.9408027792462884,
+        "point_estimate": 0.9095954404403841,
+        "ci_lower": 0.8641600757637269,
+        "ci_upper": 0.9434427939469183,
         "uninformative": false
       }
     ],
@@ -291,9 +291,9 @@
       {
         "name": "recall@5",
         "k": 5,
-        "point_estimate": 0.6277777777777779,
-        "ci_lower": 0.5349206349206349,
-        "ci_upper": 0.7285714285714286,
+        "point_estimate": 0.596031746031746,
+        "ci_lower": 0.5174603174603176,
+        "ci_upper": 0.6714285714285714,
         "uninformative": false
       },
       {
@@ -315,9 +315,9 @@
       {
         "name": "ndcg@10",
         "k": 10,
-        "point_estimate": 0.8506109193434975,
-        "ci_lower": 0.7644094410548943,
-        "ci_upper": 0.9168053624815402,
+        "point_estimate": 0.8547958996625882,
+        "ci_lower": 0.774154746480688,
+        "ci_upper": 0.9097280279310944,
         "uninformative": false
       }
     ],
@@ -341,9 +341,9 @@
       {
         "name": "recall@5",
         "k": 5,
-        "point_estimate": 0.5476190476190477,
-        "ci_lower": 0.46904761904761905,
-        "ci_upper": 0.6309523809523809,
+        "point_estimate": 0.5238095238095238,
+        "ci_lower": 0.4523809523809524,
+        "ci_upper": 0.6071428571428571,
         "uninformative": false
       },
       {
@@ -365,9 +365,9 @@
       {
         "name": "ndcg@10",
         "k": 10,
-        "point_estimate": 0.874912057259853,
-        "ci_lower": 0.8445471840611899,
-        "ci_upper": 0.9033664674442551,
+        "point_estimate": 0.8818279634030972,
+        "ci_lower": 0.8480077212286888,
+        "ci_upper": 0.9108611988229237,
         "uninformative": false
       }
     ],
@@ -391,9 +391,9 @@
       {
         "name": "recall@5",
         "k": 5,
-        "point_estimate": 0.65,
-        "ci_lower": 0.5666666666666667,
-        "ci_upper": 0.7380952380952381,
+        "point_estimate": 0.5785714285714286,
+        "ci_lower": 0.4904761904761905,
+        "ci_upper": 0.6738095238095239,
         "uninformative": false
       },
       {
@@ -415,9 +415,9 @@
       {
         "name": "ndcg@10",
         "k": 10,
-        "point_estimate": 0.9041683890277755,
-        "ci_lower": 0.8691657670447677,
-        "ci_upper": 0.9372754866066317,
+        "point_estimate": 0.8903868154263032,
+        "ci_lower": 0.8615751645407292,
+        "ci_upper": 0.9175811503765059,
         "uninformative": false
       }
     ],
@@ -425,8 +425,8 @@
       {
         "name": "hit@1",
         "k": 1,
-        "point_estimate": 1.0,
-        "ci_lower": 1.0,
+        "point_estimate": 0.9523809523809523,
+        "ci_lower": 0.8571428571428571,
         "ci_upper": 1.0,
         "uninformative": false
       },
@@ -441,9 +441,9 @@
       {
         "name": "recall@5",
         "k": 5,
-        "point_estimate": 0.7698412698412698,
-        "ci_lower": 0.6587301587301587,
-        "ci_upper": 0.8730158730158731,
+        "point_estimate": 0.7301587301587301,
+        "ci_lower": 0.6269841269841269,
+        "ci_upper": 0.8333333333333334,
         "uninformative": true
       },
       {
@@ -457,21 +457,21 @@
       {
         "name": "mrr@10",
         "k": 10,
-        "point_estimate": 1.0,
-        "ci_lower": 1.0,
+        "point_estimate": 0.9761904761904762,
+        "ci_lower": 0.9285714285714286,
         "ci_upper": 1.0,
         "uninformative": false
       },
       {
         "name": "ndcg@10",
         "k": 10,
-        "point_estimate": 0.9362891121382129,
-        "ci_lower": 0.9099351071237409,
-        "ci_upper": 0.9606261115951567,
+        "point_estimate": 0.9271245399201643,
+        "ci_lower": 0.8790384043196676,
+        "ci_upper": 0.9630566665279103,
         "uninformative": false
       }
     ]
   },
-  "latency_p50_ms": 1573.0,
-  "latency_p95_ms": 2575.0
+  "latency_p50_ms": 50.0,
+  "latency_p95_ms": 63.0
 }
