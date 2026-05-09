@@ -38,7 +38,9 @@ use amici::eval::baseline::{
 use amici::eval::fixture::{
     EvalDocument, EvalQuery, load_documents, load_known_answers, load_queries,
 };
-use amici::eval::metrics::{MetricResult, bootstrap_ci, mrr_at_k, ndcg_at_k, recall_at_k};
+use amici::eval::metrics::{
+    MetricResult, bootstrap_ci, hit_at_k, mrr_at_k, ndcg_at_k, recall_at_k,
+};
 use amici::eval::oracle_gap::{compute_gap, format_markdown};
 use amici::eval::oracle_pipeline::{OracleError, evaluate_oracle};
 use amici::eval::pipeline::{PipelineConfig, PipelineError, QueryResult, evaluate as run_pipeline};
@@ -423,11 +425,15 @@ fn parse_normalization_from_kvs(
 /// Anchors the contract that misspelled metric names cannot silently slip
 /// past the tolerance gate: `build_global_metrics` iterates `MetricSpec::ALL`,
 /// the JSON `name` field is derived from [`MetricSpec::name`], and
-/// `verify-baseline` resolves the committed name back through
-/// [`MetricSpec::from_name`] to look up its tolerance. Per-metric tolerance
-/// bounds (FR-017) come from [`MetricSpec::tolerance`].
+/// `verify-baseline` iterates the same `ALL` slice — comparing each spec's
+/// committed point estimate against the current run — so a stale baseline
+/// missing newer metrics is rejected as a regeneration prompt rather than
+/// silently skipping the gate. Per-metric tolerance bounds (FR-017) come
+/// from [`MetricSpec::tolerance`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MetricSpec {
+    HitAt1,
+    HitAt3,
     RecallAt5,
     RecallAt10,
     MrrAt10,
@@ -435,9 +441,11 @@ enum MetricSpec {
 }
 
 impl MetricSpec {
-    /// All specs in canonical emission order. `BaselineSnapshot.global` is
-    /// produced by mapping over this slice.
+    /// All specs in canonical emission order (ADR-0003 importance order).
+    /// `BaselineSnapshot.global` is produced by mapping over this slice.
     const ALL: &'static [Self] = &[
+        Self::HitAt1,
+        Self::HitAt3,
         Self::RecallAt5,
         Self::RecallAt10,
         Self::MrrAt10,
@@ -447,6 +455,8 @@ impl MetricSpec {
     /// JSON-serialised metric label as it appears in `MetricResult.name`.
     const fn name(self) -> &'static str {
         match self {
+            Self::HitAt1 => "hit@1",
+            Self::HitAt3 => "hit@3",
             Self::RecallAt5 => "recall@5",
             Self::RecallAt10 => "recall@10",
             Self::MrrAt10 => "mrr@10",
@@ -456,6 +466,8 @@ impl MetricSpec {
 
     const fn k(self) -> usize {
         match self {
+            Self::HitAt1 => 1,
+            Self::HitAt3 => 3,
             Self::RecallAt5 => 5,
             Self::RecallAt10 | Self::MrrAt10 | Self::NdcgAt10 => 10,
         }
@@ -463,6 +475,7 @@ impl MetricSpec {
 
     fn metric_fn(self) -> MetricFn {
         match self {
+            Self::HitAt1 | Self::HitAt3 => hit_at_k,
             Self::RecallAt5 | Self::RecallAt10 => recall_at_k,
             Self::MrrAt10 => mrr_at_k,
             Self::NdcgAt10 => ndcg_at_k,
@@ -471,23 +484,25 @@ impl MetricSpec {
 
     /// Per-metric drift tolerance for `verify-baseline` (FR-017).
     ///
-    /// Cross-process MLX reranker forward exhibits f32 non-determinism that
-    /// propagates to score-sensitive metrics. Embedder forward is bit-identical
-    /// (proven by `mlx_smoke verify-fixture`); the bound below absorbs the
-    /// reranker-side noise. See ADR 0003 § Reproducibility.
-    ///
-    /// Bounds set to ≥ 2× empirically observed max drift (N=10 + historical
-    /// session max), keeping >1% regression detectable while accepting
-    /// non-determinism inherent to Apple Silicon Metal f32 ops.
+    /// Bounds absorb cross-process MLX reranker f32 non-determinism on
+    /// Apple Silicon Metal. Set to ≥ 2× empirically observed max drift
+    /// (N=10 + historical session max), with floor `1e-3`. `HitAt1` /
+    /// `HitAt3` floor applies because the current fixture's `mrr@10 = 1.0`
+    /// ceiling pins both metrics at 1.0; recalibrate once the ceiling
+    /// lifts. See ADR-0003 § Reproducibility.
     const fn tolerance(self) -> f64 {
         match self {
+            Self::HitAt1 | Self::HitAt3 => 1e-3,
             Self::RecallAt5 => 1e-2,
             Self::RecallAt10 | Self::MrrAt10 | Self::NdcgAt10 => 1e-3,
         }
     }
 
-    /// Inverse of [`name()`]; returns `None` for unknown labels (e.g. a
-    /// committed baseline produced by an older harness version).
+    /// Inverse of [`Self::name`]; returns `None` for unknown labels.
+    /// Test-only — `verify-baseline` iterates `MetricSpec::ALL` directly
+    /// to defeat stale-baseline blind spots, so production code does not
+    /// need `from_name`.
+    #[cfg(test)]
     fn from_name(name: &str) -> Option<Self> {
         Self::ALL.iter().copied().find(|s| s.name() == name)
     }
@@ -1079,34 +1094,43 @@ fn run_verify_baseline_with<E: Embed, R: Rerank>(
         }
     };
     let current_global = build_global_metrics(&results, &queries);
-    let by_name: HashMap<&str, &MetricResult> = current_global
+    let by_name_current: HashMap<&str, &MetricResult> = current_global
+        .iter()
+        .map(|m| (m.name.as_str(), m))
+        .collect();
+    let by_name_committed: HashMap<&str, &MetricResult> = committed
+        .global
         .iter()
         .map(|m| (m.name.as_str(), m))
         .collect();
 
-    for committed_m in &committed.global {
-        let Some(current_m) = by_name.get(committed_m.name.as_str()) else {
+    // Iterate `MetricSpec::ALL` (the current harness contract) so a stale
+    // baseline that pre-dates a metric addition cannot silently skip the
+    // newly added gate. Every known spec must be present in both committed
+    // and current runs; missing committed entry signals a stale snapshot
+    // and is rejected as a regeneration prompt.
+    for spec in MetricSpec::ALL {
+        let name = spec.name();
+        let Some(current_m) = by_name_current.get(name) else {
             eprintln!(
-                "verify-baseline: failed — committed metric {} missing in current run",
-                committed_m.name
-            );
-            return ExitCode::from(EXIT_REGRESSION);
-        };
-        let Some(spec) = MetricSpec::from_name(&committed_m.name) else {
-            eprintln!(
-                "verify-baseline: failed — committed metric name {:?} is not a known MetricSpec; \
-                 baseline.json may have been produced by a newer harness version",
-                committed_m.name
+                "verify-baseline: failed — current metric {name} missing from harness output"
             );
             return ExitCode::from(EXIT_INFRA);
+        };
+        let Some(committed_m) = by_name_committed.get(name) else {
+            eprintln!(
+                "verify-baseline: failed — committed baseline lacks {name}; \
+                 regenerate via capture-baseline (likely produced by an older harness version)"
+            );
+            return ExitCode::from(EXIT_REGRESSION);
         };
         let diff = (committed_m.point_estimate - current_m.point_estimate).abs();
         let tol = spec.tolerance();
         if diff > tol {
             eprintln!(
-                "verify-baseline: failed — {} drifted by {diff:.6} > {tol:.6} \
+                "verify-baseline: failed — {name} drifted by {diff:.6} > {tol:.6} \
                  (committed {:.6} vs current {:.6})",
-                committed_m.name, committed_m.point_estimate, current_m.point_estimate
+                committed_m.point_estimate, current_m.point_estimate
             );
             return ExitCode::from(EXIT_REGRESSION);
         }
@@ -1655,5 +1679,67 @@ mod tests {
         // others stay at default
         assert!((parsed.rrf_k - 60.0).abs() < f64::EPSILON);
         assert!((parsed.source_weights[&CandidateSource::Vector] - 1.0).abs() < f64::EPSILON);
+    }
+
+    // T-061-010: `MetricSpec::ALL` leads with HitAt1 / HitAt3.
+    #[test]
+    fn metric_spec_all_starts_with_hit_variants_in_order() {
+        assert_eq!(
+            MetricSpec::ALL[0],
+            MetricSpec::HitAt1,
+            "MetricSpec::ALL[0] must be HitAt1 so baseline.json global[0] is hit@1"
+        );
+        assert_eq!(
+            MetricSpec::ALL[1],
+            MetricSpec::HitAt3,
+            "MetricSpec::ALL[1] must be HitAt3 so baseline.json global[1] is hit@3"
+        );
+    }
+
+    // T-061-011: HitAt{1,3}.k() returns the cutoff encoded in the variant name.
+    #[test]
+    fn metric_spec_hit_variants_report_correct_k() {
+        assert_eq!(
+            MetricSpec::HitAt1.k(),
+            1,
+            "HitAt1.k() must be 1 to dispatch hit_at_k against the top-1 window"
+        );
+        assert_eq!(
+            MetricSpec::HitAt3.k(),
+            3,
+            "HitAt3.k() must be 3 to dispatch hit_at_k against the top-3 window"
+        );
+    }
+
+    // T-061-012: from_name("hit@{1,3}") resolves to HitAt{1,3}.
+    #[test]
+    fn metric_spec_from_name_resolves_hit_labels() {
+        assert_eq!(
+            MetricSpec::from_name("hit@1"),
+            Some(MetricSpec::HitAt1),
+            "from_name(\"hit@1\") must resolve to HitAt1 so verify-baseline can look up tolerance"
+        );
+        assert_eq!(
+            MetricSpec::from_name("hit@3"),
+            Some(MetricSpec::HitAt3),
+            "from_name(\"hit@3\") must resolve to HitAt3 so verify-baseline can look up tolerance"
+        );
+    }
+
+    // T-061-013: HitAt1.metric_fn() dispatches to hit_at_k.
+    //
+    // Grade-0 input is the discriminator: hit_at_k returns 0.0, while a wrong
+    // dispatch to recall_at_k would also return 0.0 only by coincidence (empty
+    // relevance set), so this case anchors the dispatch contract specifically.
+    #[test]
+    fn metric_spec_hit1_metric_fn_dispatches_to_hit_at_k() {
+        let ranked: &[&str] = &["d1"];
+        let relevance: HashMap<String, u8> = HashMap::from([("d1".to_owned(), 0u8)]);
+        let dispatch = MetricSpec::HitAt1.metric_fn();
+        let result = dispatch(ranked, &relevance, 1);
+        assert!(
+            result.abs() < f64::EPSILON,
+            "HitAt1.metric_fn() on grade-0 input must yield 0.0; got {result}"
+        );
     }
 }

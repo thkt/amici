@@ -103,6 +103,22 @@ pub fn ndcg_at_k(ranked: &[&str], relevance: &HashMap<String, u8>, k: usize) -> 
     if idcg == 0.0 { 0.0 } else { dcg / idcg }
 }
 
+/// Hit@k with binary relevance threshold rel ≥ 1.
+///
+/// Returns `1.0` when at least one document id in the top-k window of
+/// `ranked` has a relevance grade `≥ 1`, otherwise `0.0`. Hit@k is binary
+/// at the per-query level; see ADR-0003 for the agentic-search sensitivity
+/// rationale that motivates it.
+#[must_use]
+pub fn hit_at_k(ranked: &[&str], relevance: &HashMap<String, u8>, k: usize) -> f64 {
+    for id in ranked.iter().take(k) {
+        if relevance.get(*id).is_some_and(|&g| g >= 1) {
+            return 1.0;
+        }
+    }
+    0.0
+}
+
 /// Bootstrap 95% CI for an arbitrary metric.
 ///
 /// Returns `(point_estimate, ci_lower, ci_upper)`. The point estimate is
@@ -285,6 +301,120 @@ mod tests {
             (upper_a - upper_b).abs() < f64::EPSILON,
             "FR-004 / NFR-002: ci_upper must be bit-identical across runs with seed=42 \
              (got {upper_a} vs {upper_b})"
+        );
+    }
+
+    // T-061-001: hit_at_k_top_1_relevant_returns_one
+    // Hit@k: ranked = ["d1", "d2"], relevance = {"d1": 1}, k = 1 → 1.0
+    // Perspective: Equivalence (relevant doc inside top-k window).
+    #[test]
+    fn hit_at_k_top_1_relevant_returns_one() {
+        let ranked = ranked(&["d1", "d2"]);
+        let rel = relevance(&[("d1", 1)]);
+
+        let result = hit_at_k(&ranked, &rel, 1);
+
+        assert!(
+            (result - 1.0).abs() < f64::EPSILON,
+            "relevant doc at rank 1 within k=1 → Hit@k must be 1.0, got: {result}"
+        );
+    }
+
+    // T-061-002: hit_at_k_relevant_at_rank_two_within_k_returns_one
+    // Hit@k: ranked = ["d2", "d1"], relevance = {"d1": 1}, k = 2 → 1.0
+    // Perspective: Boundary (relevant doc at the last position inside k).
+    #[test]
+    fn hit_at_k_relevant_at_rank_two_within_k_returns_one() {
+        let ranked = ranked(&["d2", "d1"]);
+        let rel = relevance(&[("d1", 1)]);
+
+        let result = hit_at_k(&ranked, &rel, 2);
+
+        assert!(
+            (result - 1.0).abs() < f64::EPSILON,
+            "relevant doc at rank 2 within k=2 → Hit@k must be 1.0, got: {result}"
+        );
+    }
+
+    // T-061-003: hit_at_k_empty_ranked_returns_zero
+    // Hit@k: ranked = [], relevance = {"d1": 1}, k = 5 → 0.0 (no panic)
+    // Perspective: Boundary / Error (empty ranked slice must not panic).
+    #[test]
+    fn hit_at_k_empty_ranked_returns_zero() {
+        let ranked: Vec<&str> = ranked(&[]);
+        let rel = relevance(&[("d1", 1)]);
+
+        let result = hit_at_k(&ranked, &rel, 5);
+
+        assert!(
+            result.abs() < f64::EPSILON,
+            "empty ranked slice → Hit@k must be 0.0, got: {result}"
+        );
+    }
+
+    // T-061-004: hit_at_k_no_relevant_in_top_k_returns_zero
+    // Hit@k: ranked = ["d2", "d3"], relevance = {"d1": 1}, k = 2 → 0.0
+    // Perspective: Branch (top-k disjoint from relevant set).
+    #[test]
+    fn hit_at_k_no_relevant_in_top_k_returns_zero() {
+        let ranked = ranked(&["d2", "d3"]);
+        let rel = relevance(&[("d1", 1)]);
+
+        let result = hit_at_k(&ranked, &rel, 2);
+
+        assert!(
+            result.abs() < f64::EPSILON,
+            "top-k window disjoint from relevant set → Hit@k must be 0.0, got: {result}"
+        );
+    }
+
+    // T-061-005: hit_at_k_k_greater_than_n_returns_one
+    // Hit@k: ranked = ["d1"], relevance = {"d1": 1}, k = 10 → 1.0 (no panic)
+    // Perspective: Boundary (k > N must clamp to ranked.len() without panic).
+    #[test]
+    fn hit_at_k_k_greater_than_n_returns_one() {
+        let ranked = ranked(&["d1"]);
+        let rel = relevance(&[("d1", 1)]);
+
+        let result = hit_at_k(&ranked, &rel, 10);
+
+        assert!(
+            (result - 1.0).abs() < f64::EPSILON,
+            "k=10 exceeds ranked.len()=1 but relevant doc present → Hit@k must be 1.0, got: {result}"
+        );
+    }
+
+    // T-061-006: hit_at_k_grade_zero_treated_as_irrelevant_returns_zero
+    // Hit@k: ranked = ["d1"], relevance = {"d1": 0}, k = 1 → 0.0
+    // Perspective: Boundary / Condition (grade < 1 must not count as a hit;
+    // mirrors the rel ≥ 1 threshold used by recall_at_k / mrr_at_k).
+    #[test]
+    fn hit_at_k_grade_zero_treated_as_irrelevant_returns_zero() {
+        let ranked = ranked(&["d1"]);
+        let rel = relevance(&[("d1", 0)]);
+
+        let result = hit_at_k(&ranked, &rel, 1);
+
+        assert!(
+            result.abs() < f64::EPSILON,
+            "grade 0 is below the rel ≥ 1 threshold → Hit@k must be 0.0, got: {result}"
+        );
+    }
+
+    // T-061-007: hit_at_k_grade_three_counts_as_hit_returns_one
+    // Hit@k: ranked = ["d1"], relevance = {"d1": 3}, k = 1 → 1.0
+    // Perspective: Boundary / Condition (highest graded relevance still
+    // satisfies the binary rel ≥ 1 threshold).
+    #[test]
+    fn hit_at_k_grade_three_counts_as_hit_returns_one() {
+        let ranked = ranked(&["d1"]);
+        let rel = relevance(&[("d1", 3)]);
+
+        let result = hit_at_k(&ranked, &rel, 1);
+
+        assert!(
+            (result - 1.0).abs() < f64::EPSILON,
+            "grade 3 satisfies rel ≥ 1 → Hit@k must be 1.0, got: {result}"
         );
     }
 }
