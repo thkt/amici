@@ -20,7 +20,7 @@ required-features = ["eval-harness"]
 bytemuck           = "1"
 rand               = "0.10"
 rand_chacha        = "0.10"
-rurico             = { git = "https://github.com/thkt/rurico", rev = "42d0ca4" }
+rurico             = { git = "https://github.com/thkt/rurico", rev = "e44fefe" }
 rusqlite           = { version = "0.39", features = ["bundled"] }
 serde              = { version = "1", features = ["derive"] }
 serde_json         = "1"
@@ -29,7 +29,7 @@ tracing            = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
-rurico      = { git = "https://github.com/thkt/rurico", rev = "42d0ca4", features = ["test-support"] }
+rurico      = { git = "https://github.com/thkt/rurico", rev = "e44fefe", features = ["test-support"] }
 serial_test = "3"
 tempfile    = "3"
 
