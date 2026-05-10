@@ -9,6 +9,7 @@
 pub mod annotation;
 pub mod baseline;
 pub mod fixture;
+pub mod io;
 pub mod metrics;
 pub mod oracle_gap;
 pub mod oracle_pipeline;

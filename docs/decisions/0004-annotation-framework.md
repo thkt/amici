@@ -79,6 +79,7 @@ Option 1 を採用する。
 - T-001 (naming collision readability) が PASS していても、実運用で `EvalQuery.annotation` と `eval::annotation::Entry` の混同による不具合が報告された場合 → §Considered Options Option 3 (rename existing field) を再評価
 - contributor 数が増え authoring tool の使用頻度が baseline capture と同等以上になり、capture / authoring envelope の symmetric 化要望が複数 contributor から出た場合 → Option 2 (`BaselineSnapshot` mirror + `BaselineKind::Annotation`) を再評価
 - `ANNOTATION_SCHEMA_VERSION` の bump 頻度が `BASELINE_SCHEMA_VERSION` を超える状態が継続した場合 → 2 envelope 維持の正当性 (独立進化) が機能している証左、本 ADR の方針継続を強化
+- Phase 1.5 (sub-PR-D) Collaborative mode 着手時、§Decision Outcome 第 3 項 (`Provenance.model_id` / `mlx_rs_version` 追加 + `ANNOTATION_SCHEMA_VERSION` 1.0→1.1 bump) は `LlmProvider` trait を `annotation_context` に optional injection する経路で達成することを default 設計とする。`EvalContext<E, R>` を annotate に流用する経路 (MLX runtime 直結) は §Decision Outcome 第 1 項 (annotation 側境界の独立進化) と衝突するため reject。本 trigger は sub-PR-D の design step で再評価する
 
 ## References
 
