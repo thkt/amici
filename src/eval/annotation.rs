@@ -13,6 +13,8 @@
 //! `docs/decisions/0004-annotation-framework.md`.
 
 use std::collections::BTreeMap;
+use std::io;
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
@@ -110,6 +112,24 @@ impl Session {
         }
         Ok(())
     }
+
+    /// Atomic-write this session as pretty JSON to `path`.
+    ///
+    /// Delegates to [`super::io::write_json`] so [`Session`] and
+    /// [`super::baseline::BaselineSnapshot`] share one atomic-write
+    /// code path. `serde_json` failures are funneled through
+    /// [`io::Error::other`] inside that helper, so callers only need
+    /// to match [`AnnotationError::Io`] for both serialisation and
+    /// filesystem faults.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AnnotationError::Io`] when the temp file cannot be
+    /// created, written, fsynced, or renamed into place.
+    pub fn write_json(&self, path: &Path) -> Result<(), AnnotationError> {
+        super::io::write_json(self, path)?;
+        Ok(())
+    }
 }
 
 /// Errors surfaced by annotation framework operations.
@@ -128,9 +148,19 @@ pub enum AnnotationError {
     /// Annotation session contains zero entries.
     #[error("annotation session is empty")]
     EmptySession,
-    /// JSON serialisation / deserialisation failure.
+    /// JSON serialisation / deserialisation failure. Retained for
+    /// forward compatibility — Phase 1 onwards, `serde_json::Error`
+    /// raised inside [`Session::write_json`] is funneled via
+    /// [`io::Error::other`] in [`super::io::write_json`] and surfaces as
+    /// [`AnnotationError::Io`]. Future deserialise paths (e.g.
+    /// `Session::read_json`) will fire this variant directly.
     #[error("annotation serialise error: {0}")]
     Serialise(#[from] serde_json::Error),
+    /// I/O failure during atomic write or read of session JSON. Wraps
+    /// both raw [`io::Error`] and `serde_json` failures funneled via
+    /// [`io::Error::other`] in [`super::io::write_json`].
+    #[error("annotation io error: {0}")]
+    Io(#[from] io::Error),
 }
 
 #[cfg(test)]

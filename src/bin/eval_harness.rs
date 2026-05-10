@@ -23,6 +23,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::env;
 use std::fs;
+use std::io::{self, BufRead, IsTerminal};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -31,6 +32,7 @@ use rand::SeedableRng;
 use rand::seq::SliceRandom;
 use rand_chacha::ChaCha8Rng;
 
+use amici::eval::annotation::{ANNOTATION_SCHEMA_VERSION, Entry, Provenance, Session};
 use amici::eval::baseline::{
     BASELINE_SCHEMA_VERSION, BaselineKind, BaselineSnapshot, atomic_write, build_metric_result,
     write_json,
@@ -553,6 +555,7 @@ fn main() -> ExitCode {
         "oracle-gap" => run_oracle_gap(&kvs),
         "verify-baseline" => run_verify_baseline(&kvs),
         "compare-baselines" => run_compare_baselines(&kvs),
+        "annotate" => run_annotate(&kvs),
         other => {
             eprintln!("unknown mode: {other}");
             ExitCode::from(EXIT_USAGE)
@@ -1798,9 +1801,238 @@ fn hash_fixture_dir(fixture_dir: &Path) -> Result<String, String> {
     Ok(format!("fnv1a64:{hash:016x}"))
 }
 
+/// MLX-free runtime context for the `annotate` subcommand. Carries the
+/// fixture directory whose `queries.jsonl` content hash is stamped into
+/// `Provenance.queries_jsonl_hash`, plus an injectable timestamp closure
+/// so tests can pin a deterministic `epoch:N` label without faking
+/// `SystemTime`.
+///
+/// Distinct from [`EvalContext`] because Phase 1 block-mode authoring
+/// touches no MLX runtime — embedder/reranker fields would be dead
+/// weight here.
+struct AnnotationContext {
+    fixture_dir: PathBuf,
+    timestamp: Box<dyn Fn() -> String>,
+}
+
+/// Build the runtime [`AnnotationContext`] for `annotate`.
+///
+/// Honours `fixture_dir=<path>` argv (used by the integration tests to
+/// redirect to a sandbox tempdir). Falls back to the production
+/// `tests/fixtures/eval/` under `CARGO_MANIFEST_DIR`. The timestamp
+/// closure resolves to the live [`capture_timestamp_label`].
+fn annotation_context(kvs: &HashMap<String, String>) -> AnnotationContext {
+    let fixture_dir = kvs.get("fixture_dir").map_or_else(
+        || Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/eval"),
+        PathBuf::from,
+    );
+    AnnotationContext {
+        fixture_dir,
+        timestamp: Box::new(capture_timestamp_label),
+    }
+}
+
+/// Category allowlist for `Entry.category`. Tracks the eight categories
+/// present in `tests/fixtures/eval/queries.jsonl` (AS-001). A new category
+/// in the fixture must be propagated here (BR-004) before annotations
+/// containing it will be accepted.
+const CATEGORY_ALLOWLIST: &[&str] = &[
+    "comparative",
+    "conceptual",
+    "definitional",
+    "factoid",
+    "howto",
+    "listing",
+    "troubleshooting",
+    "variant_notation",
+];
+
+/// Maximum graded relevance value accepted in `Entry.relevance_map`. The
+/// `u8` parse already enforces ≥ 0 (FR-V002).
+const MAX_RELEVANCE_GRADE: u8 = 3;
+
+/// FR-011: literal stderr line emitted when `annotate` is invoked with a
+/// TTY stdin. Phase 1 has no interactive UX (deferred to sub-PR-D), so
+/// the only safe ingress is `cat session.jsonl | eval_harness annotate ...`.
+const TTY_REJECT_MESSAGE: &str =
+    "annotate: pipe jsonl into stdin (interactive UX deferred to sub-PR-D)";
+
+/// FR-011 dispatch helper. Returns `Some(ExitCode)` for a TTY stdin so
+/// callers can short-circuit before stdin parsing; `None` lets the caller
+/// continue. Pure boolean argument so unit tests can verify the branch
+/// table without faking [`std::io::IsTerminal`] (CI lanes inherit stdin as
+/// pipe / null and cannot reproduce the TTY case via subprocess spawn).
+fn check_stdin_tty_guard(is_tty: bool) -> Option<ExitCode> {
+    if is_tty {
+        eprintln!("{TTY_REJECT_MESSAGE}");
+        Some(ExitCode::from(EXIT_USAGE))
+    } else {
+        None
+    }
+}
+
+/// `annotate output=<path> annotator_id=<id> session_id=<id>` — Phase 1
+/// block-mode session capture (Issue #53 sub-PR-B).
+///
+/// Reads jsonl [`Entry`] lines from stdin, builds a [`Session`] with
+/// canonical [`Provenance`], runs `validate_schema_version`, and atomic-writes
+/// pretty JSON to `<path>`. MLX-free per NFR-001 — excluded from
+/// [`MLX_DEPENDENT_MODES`].
+fn run_annotate(kvs: &HashMap<String, String>) -> ExitCode {
+    let Some(output_path_raw) = kvs.get("output") else {
+        eprintln!("annotate: output= argument required");
+        return ExitCode::from(EXIT_USAGE);
+    };
+    if let Some(exit) = check_stdin_tty_guard(io::stdin().is_terminal()) {
+        return exit;
+    }
+    let output_path = match validate_output_path(output_path_raw) {
+        Ok(p) => p,
+        Err(msg) => {
+            eprintln!("annotate: {msg}");
+            return ExitCode::from(EXIT_USAGE);
+        }
+    };
+    let Some(annotator_id) = kvs.get("annotator_id") else {
+        eprintln!("annotate: annotator_id= argument required");
+        return ExitCode::from(EXIT_USAGE);
+    };
+    let Some(session_id) = kvs.get("session_id") else {
+        eprintln!("annotate: session_id= argument required");
+        return ExitCode::from(EXIT_USAGE);
+    };
+
+    let ctx = annotation_context(kvs);
+    let queries_jsonl_hash = match hash_fixture_dir(&ctx.fixture_dir) {
+        Ok(h) => h,
+        Err(msg) => {
+            eprintln!("annotate: {msg}");
+            return ExitCode::from(EXIT_INFRA);
+        }
+    };
+
+    let stdin = io::stdin();
+    let mut entries: Vec<Entry> = Vec::new();
+    let mut seen_ids: HashMap<String, usize> = HashMap::new();
+    for (line_idx, line_result) in stdin.lock().lines().enumerate() {
+        let line_no = line_idx + 1;
+        let line = match line_result {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("annotate: line {line_no} read error: {e}");
+                return ExitCode::from(EXIT_USAGE);
+            }
+        };
+        if line.trim().is_empty() {
+            continue;
+        }
+        let entry: Entry = match serde_json::from_str(&line) {
+            Ok(e) => e,
+            Err(e) => {
+                eprintln!("annotate: line {line_no} parse error: {e}");
+                return ExitCode::from(EXIT_USAGE);
+            }
+        };
+        if !CATEGORY_ALLOWLIST.contains(&entry.category.as_str()) {
+            eprintln!(
+                "annotate: line {line_no} invalid category {got:?}; expected one of {CATEGORY_ALLOWLIST:?}",
+                got = entry.category,
+            );
+            return ExitCode::from(EXIT_USAGE);
+        }
+        if let Some((doc_id, grade)) = entry
+            .relevance_map
+            .iter()
+            .find(|(_, g)| **g > MAX_RELEVANCE_GRADE)
+        {
+            eprintln!("annotate: line {line_no} invalid grade {doc_id}={grade}; expected 0..=3");
+            return ExitCode::from(EXIT_USAGE);
+        }
+        if let Some(prev_line) = seen_ids.get(&entry.id) {
+            eprintln!(
+                "annotate: line {line_no} duplicate id {id} (first seen on line {prev_line})",
+                id = entry.id,
+            );
+            return ExitCode::from(EXIT_USAGE);
+        }
+        seen_ids.insert(entry.id.clone(), line_no);
+        entries.push(entry);
+    }
+
+    if entries.is_empty() {
+        eprintln!("annotate: empty session, no entries written");
+        return ExitCode::from(EXIT_USAGE);
+    }
+
+    let session = Session {
+        provenance: Provenance {
+            schema_version: ANNOTATION_SCHEMA_VERSION.to_owned(),
+            captured_with: "annotate".to_owned(),
+            timestamp: (ctx.timestamp)(),
+            annotator_id: annotator_id.clone(),
+            session_id: session_id.clone(),
+            queries_jsonl_hash,
+        },
+        entries,
+    };
+
+    if let Err(e) = session.validate_schema_version() {
+        eprintln!("annotate: schema version mismatch: {e}");
+        return ExitCode::from(EXIT_INFRA);
+    }
+
+    if let Err(e) = session.write_json(&output_path) {
+        eprintln!("annotate: write failed: {e}");
+        return ExitCode::from(EXIT_INFRA);
+    }
+
+    let n_entries = session.entries.len();
+    eprintln!(
+        "annotate: wrote {} ({n_entries} entries)",
+        output_path.display()
+    );
+    ExitCode::SUCCESS
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // T-004: tty_reject_message_contains_fr_011_substring
+    // FR-011: TTY_REJECT_MESSAGE must literally contain
+    //         "pipe jsonl into stdin" so an interactive run prints the
+    //         exact substring required by Spec FR-011.
+    //
+    // Spec Evolution 2026-05-10: integration variant infeasible —
+    // `cargo test` lanes inherit stdin as pipe / null, so
+    // `is_terminal() == true` is unreproducible across CI hosts. The
+    // boolean dispatch is verified separately in
+    // `tty_guard_returns_usage_for_terminal` so the constant + dispatch
+    // pair fully cover FR-011.
+    #[test]
+    fn tty_reject_message_contains_fr_011_substring() {
+        assert!(
+            TTY_REJECT_MESSAGE.contains("pipe jsonl into stdin"),
+            "FR-011: TTY_REJECT_MESSAGE must contain 'pipe jsonl into stdin'; \
+             got: {TTY_REJECT_MESSAGE}"
+        );
+    }
+
+    // T-004: tty_guard_returns_usage_for_terminal
+    // FR-011: when stdin is a TTY, `check_stdin_tty_guard` returns
+    //         `Some(ExitCode)`; otherwise it returns `None` so
+    //         `run_annotate` proceeds with stdin parsing.
+    #[test]
+    fn tty_guard_returns_usage_for_terminal() {
+        assert!(
+            check_stdin_tty_guard(true).is_some(),
+            "FR-011: TTY stdin must short-circuit run_annotate"
+        );
+        assert!(
+            check_stdin_tty_guard(false).is_none(),
+            "FR-011: piped stdin must not short-circuit run_annotate"
+        );
+    }
 
     // T-067-007: aggregation_kind_topk_average_roundtrips_through_name
     //
