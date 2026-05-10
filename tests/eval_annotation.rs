@@ -411,3 +411,40 @@ fn t012_eval_query_annotation_and_entry_annotation_note_coexist() {
          not aliased to EvalQuery.annotation"
     );
 }
+
+// T-013: t013_adr_0004_reassessment_triggers_record_llm_provider_path
+// FR-030 / FR-031 / FR-032: ADR-0004 §Reassessment Triggers must mention
+//   "LlmProvider" so sub-PR-D's design step surfaces the assumption
+//   (AS-005). Status header must remain `- Status: proposed` until
+//   sub-PR-C lands. NFR-003 forbids post-cutoff external citations
+//   (`arXiv:2602`, `AIANO`, `ADR-0021`).
+#[test]
+fn t013_adr_0004_reassessment_triggers_record_llm_provider_path() {
+    let adr_path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/decisions/0004-annotation-framework.md");
+    let content = fs::read_to_string(&adr_path)
+        .unwrap_or_else(|e| panic!("[T-013] read {}: {e}", adr_path.display()));
+
+    assert!(
+        content.contains("LlmProvider"),
+        "[T-013] FR-030: ADR-0004 must mention LlmProvider in §Reassessment Triggers; \
+         content snapshot:\n{content}"
+    );
+
+    let has_proposed_status = content
+        .lines()
+        .any(|line| line.trim() == "- Status: proposed");
+    assert!(
+        has_proposed_status,
+        "[T-013] FR-031: ADR-0004 Status header must remain `- Status: proposed`; \
+         content snapshot:\n{content}"
+    );
+
+    for forbidden in ["arXiv:2602", "AIANO", "ADR-0021"] {
+        assert!(
+            !content.contains(forbidden),
+            "[T-013] FR-032 / NFR-003: ADR-0004 must not cite {forbidden:?} \
+             (post-cutoff external citation); content snapshot:\n{content}"
+        );
+    }
+}
