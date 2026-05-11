@@ -127,6 +127,14 @@ const VALID_EVALUATE_KINDS: &[&str] = &[
 /// only appears in one place across argv validation and dispatch.
 const ORACLE_KIND_SUFFIX: &str = "_oracle";
 
+/// BR-003 marker written to [`BaselineSnapshot::aggregation`] for
+/// [`BaselineKind::FirstSearchReplay`]. Stage 3 runs `MaxChunkAggregator`
+/// only — no ranking-aware aggregator is invoked, so the field has no
+/// `AggregationKind::name()` to record. Kept as a constant so the
+/// production capture and the test helper that mirrors it share one
+/// source of truth.
+const AGGREGATION_NONE: &str = "none";
+
 /// Closed set of Stage 3 aggregation kinds accepted by `aggregation=...`.
 /// Anchors argv validation and round-tripping with the `aggregation` field
 /// on [`BaselineSnapshot`].
@@ -771,26 +779,17 @@ fn run_capture_baseline_with<E: Embed, R: Rerank>(
         }
     };
 
-    let global = build_global_metrics(&results, &queries);
-    let per_category = build_per_category_metrics(&results, &queries);
-    let (latency_p50_ms, latency_p95_ms) = compute_latency_percentiles(&results);
-    let snapshot = BaselineSnapshot {
-        schema_version: BASELINE_SCHEMA_VERSION.to_owned(),
-        kind: BaselineKind::Forward,
-        captured_with: "eval_harness capture-baseline".to_owned(),
-        timestamp: (ctx.timestamp)(),
-        model_id: embed::ModelId::default().repo_id().to_owned(),
-        model_revision: RURI_V3_310M_REVISION.to_owned(),
-        mlx_rs_version: MLX_RS_VERSION.to_owned(),
+    let snapshot = build_baseline_snapshot(
+        BaselineKind::Forward,
+        "eval_harness capture-baseline",
+        aggregation.name(),
+        &results,
+        &queries,
         fixture_hash,
-        aggregation: aggregation.name(),
-        merge_config: merge_config.clone(),
-        normalization: *normalization,
-        global,
-        per_category,
-        latency_p50_ms,
-        latency_p95_ms,
-    };
+        (ctx.timestamp)(),
+        merge_config,
+        normalization,
+    );
 
     if let Err(e) = write_json(&snapshot, output_path) {
         eprintln!("capture-baseline: write failed: {e}");
@@ -987,26 +986,17 @@ fn run_capture_oracle_with<E: Embed, R: Rerank>(
         }
     };
 
-    let global = build_global_metrics(&results, &queries);
-    let per_category = build_per_category_metrics(&results, &queries);
-    let (latency_p50_ms, latency_p95_ms) = compute_latency_percentiles(&results);
-    let snapshot = BaselineSnapshot {
-        schema_version: BASELINE_SCHEMA_VERSION.to_owned(),
-        kind: BaselineKind::Oracle,
-        captured_with: "eval_harness capture-oracle".to_owned(),
-        timestamp: (ctx.timestamp)(),
-        model_id: embed::ModelId::default().repo_id().to_owned(),
-        model_revision: RURI_V3_310M_REVISION.to_owned(),
-        mlx_rs_version: MLX_RS_VERSION.to_owned(),
+    let snapshot = build_baseline_snapshot(
+        BaselineKind::Oracle,
+        "eval_harness capture-oracle",
+        aggregation.name(),
+        &results,
+        &queries,
         fixture_hash,
-        aggregation: aggregation.name(),
-        merge_config: merge_config.clone(),
-        normalization: *normalization,
-        global,
-        per_category,
-        latency_p50_ms,
-        latency_p95_ms,
-    };
+        (ctx.timestamp)(),
+        merge_config,
+        normalization,
+    );
 
     if let Err(e) = write_json(&snapshot, output_path) {
         eprintln!("capture-oracle: write failed: {e}");
@@ -1096,7 +1086,10 @@ fn run_replay_first_search_with<E: Embed, R: Rerank>(
         }
     };
 
-    let snapshot = build_first_search_replay_snapshot(
+    let snapshot = build_baseline_snapshot(
+        BaselineKind::FirstSearchReplay,
+        "eval_harness replay-first-search",
+        AGGREGATION_NONE.to_owned(),
         &results,
         &queries,
         fixture_hash,
@@ -1113,11 +1106,17 @@ fn run_replay_first_search_with<E: Embed, R: Rerank>(
     ExitCode::SUCCESS
 }
 
-/// Build a `BaselineSnapshot` with `kind=FirstSearchReplay` from
-/// pipeline `results` and run-context provenance fields. Pure builder
-/// (no IO) so the snapshot envelope is unit-testable without a real
-/// MLX-backed fixture run.
-fn build_first_search_replay_snapshot(
+/// Build a `BaselineSnapshot` envelope. `kind` / `captured_with` /
+/// `aggregation` distinguish each subcommand (forward / oracle /
+/// first-search-replay); the remaining provenance (schema version,
+/// model id and revision, mlx_rs version) is fixed here so adding an
+/// envelope field only requires editing this single function (Issue #69
+/// / DRY 3+).
+#[allow(clippy::too_many_arguments)]
+fn build_baseline_snapshot(
+    kind: BaselineKind,
+    captured_with: &str,
+    aggregation: String,
     results: &[QueryResult],
     queries: &[EvalQuery],
     fixture_hash: String,
@@ -1130,16 +1129,14 @@ fn build_first_search_replay_snapshot(
     let (latency_p50_ms, latency_p95_ms) = compute_latency_percentiles(results);
     BaselineSnapshot {
         schema_version: BASELINE_SCHEMA_VERSION.to_owned(),
-        kind: BaselineKind::FirstSearchReplay,
-        captured_with: "eval_harness replay-first-search".to_owned(),
+        kind,
+        captured_with: captured_with.to_owned(),
         timestamp,
         model_id: embed::ModelId::default().repo_id().to_owned(),
         model_revision: RURI_V3_310M_REVISION.to_owned(),
         mlx_rs_version: MLX_RS_VERSION.to_owned(),
         fixture_hash,
-        // BR-003: replay runs Stage 3 = MaxChunkAggregator only — no
-        // ranking-aware aggregator is invoked, so "none" is the marker.
-        aggregation: "none".to_owned(),
+        aggregation,
         merge_config: merge_config.clone(),
         normalization: *normalization,
         global,
@@ -2300,7 +2297,10 @@ mod tests {
 
     fn build_test_replay_snapshot() -> BaselineSnapshot {
         let (results, queries) = replay_snapshot_inputs();
-        build_first_search_replay_snapshot(
+        build_baseline_snapshot(
+            BaselineKind::FirstSearchReplay,
+            "eval_harness replay-first-search",
+            AGGREGATION_NONE.to_owned(),
             &results,
             &queries,
             "fnv1a64:0".to_owned(),
