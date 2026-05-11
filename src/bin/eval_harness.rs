@@ -61,15 +61,12 @@ use rurico::{embed, reranker};
 
 /// Mock-friendly bundle of every external seam the four mode handlers touch.
 ///
-/// Generic over the embedder and reranker types so production wiring uses
-/// `embed::Embedder` plus `LazyReranker<reranker::Reranker>` — the rerank
-/// model only loads on the first method call, letting modes that never
-/// rerank (e.g. `replay-first-search`,
-/// `verify-baseline kind=first_search_replay`) skip the load entirely.
-/// Tests can swap in `MockEmbedder` / `MockReranker` (or wrap a
-/// `MockReranker` in `LazyReranker` when verifying lazy semantics). The
-/// `timestamp` closure isolates `SystemTime::now()` from the snapshot-write
-/// code path so tests can fix a deterministic capture-time label.
+/// Tests swap in `MockEmbedder` / `MockReranker`, or wrap `MockReranker`
+/// in `LazyReranker` when verifying lazy semantics (see
+/// `replay_first_search_skips_reranker_init`). The `timestamp` closure
+/// isolates `SystemTime::now()` from the snapshot-write code path so tests
+/// can fix a deterministic capture-time label. Production wiring lives in
+/// [`production_context`].
 struct EvalContext<E: Embed, R: Rerank> {
     /// Directory holding `documents.jsonl`, `queries.jsonl`, and
     /// `known_answers.jsonl`. Production uses `tests/fixtures/eval/` under
@@ -83,11 +80,10 @@ struct EvalContext<E: Embed, R: Rerank> {
     timestamp: Box<dyn Fn() -> String>,
 }
 
-/// Build the production [`EvalContext`] — loads the cached MLX embedder
-/// eagerly and wires a [`LazyReranker`] so the rerank model is only
-/// fetched on the first call. Modes that never rerank
+/// Build the production [`EvalContext`]. The embedder loads up front; the
+/// reranker is wrapped in [`LazyReranker`] so modes that never rerank
 /// (`replay-first-search`, `verify-baseline kind=first_search_replay`)
-/// avoid the cache/download/load cost entirely (ADR-0005 / Issue #68).
+/// skip the cache/download/load cost entirely (ADR-0005 / Issue #68).
 fn production_context()
 -> Result<EvalContext<embed::Embedder, LazyReranker<reranker::Reranker>>, String> {
     let embedder = init_embedder()?;
@@ -2214,18 +2210,9 @@ mod tests {
 
     // ── Issue #62 / Phase 2.3 — replay-first-search subcommand + verify-baseline 拡張 ──
 
-    // T-068-001: replay_first_search_skips_reranker_init
-    //
-    // ADR-0005 / Issue #68: production_context wraps the reranker in
-    // LazyReranker so modes that never call rerank skip the model-load
-    // cost. Drives run_replay_first_search_with against the committed
-    // fixture with a counting init closure; asserts (a) the snapshot was
-    // written with kind=FirstSearchReplay so the full pipeline executed,
-    // and (b) the init closure was never invoked.
+    // T-068-001: ADR-0005 — LazyReranker init must not fire when only the replay path runs.
     #[test]
     fn replay_first_search_skips_reranker_init() {
-        use std::fs::File;
-        use std::io::BufReader;
         use std::sync::Arc;
         use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -2238,10 +2225,12 @@ mod tests {
         let output_path = dir.path().join("replay.json");
 
         let init_calls = Arc::new(AtomicUsize::new(0));
-        let counter = Arc::clone(&init_calls);
-        let reranker = LazyReranker::<MockReranker>::new(move || {
-            counter.fetch_add(1, Ordering::SeqCst);
-            Ok(MockReranker::default())
+        let reranker = LazyReranker::new({
+            let init_calls = Arc::clone(&init_calls);
+            move || {
+                init_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(MockReranker::default())
+            }
         });
 
         let ctx = EvalContext {
@@ -2255,11 +2244,7 @@ mod tests {
         let normalization = QueryNormalizationConfig::default();
         let _exit = run_replay_first_search_with(&ctx, &output_path, &merge_config, &normalization);
 
-        let snapshot: BaselineSnapshot = serde_json::from_reader(BufReader::new(
-            File::open(&output_path)
-                .unwrap_or_else(|e| panic!("T-068-001: replay output not written: {e}")),
-        ))
-        .expect("T-068-001: replay output must deserialize as BaselineSnapshot");
+        let snapshot = read_snapshot(&output_path).unwrap_or_else(|e| panic!("T-068-001: {e}"));
         assert_eq!(
             snapshot.kind,
             BaselineKind::FirstSearchReplay,
