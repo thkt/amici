@@ -7,13 +7,16 @@ sae/yomu/recall ツールチェーンで共有するモデルローディング�
 | Module | Contents |
 | ------ | -------- |
 | `model` | `DegradedReason`, `degraded_reason_user_note`, `degrade_with_warn`, `record_degraded`, `ModelLoad<T>`, `ModelDownloadError`, `download_and_verify_model` |
-| `model::embedder` | `try_load_embedder_with` — エンベディングモデルをロード |
+| `model::embedder` | `try_load_embedder_with`, `try_load_embedder_default_logging` — エンベディングモデルをロード |
 | `model::reranker` | `try_load_reranker_with` — リランキングモデルをロード |
 | `storage::filter` | `in_placeholders`, `anon_placeholders`, `as_sql_params`, `append_eq_filter`, … — SQL `WHERE` 句とパラメータの構築ヘルパー |
 | `storage::query_helpers` | `collect_rows`, `fetch_by_in_clause` — `Connection` を取って行を回収する実行系ヘルパー（コレクション型・エラー型を generic にサポート） |
-| `cli` | `Spinner`, `with_spinner`, `try_expand_shorthand` |
+| `storage::fts` | `clean_for_trigram` — `rurico::storage::MatchFtsQuery` を FTS5 `trigram` トークナイザ向けに整形 |
+| `cli` | `Spinner`, `with_spinner`, `embed_with_spinners`, `done`, `try_expand_shorthand`, `env_lookup`, `CliError`, `exit_code::codes`, `exit_error`, `hint_arrow`, `info`, `deprecation_warn`, `progress_step` |
 | `migration` | `notify_schema_change` — スキーマクリア通知用の `tracing::warn!` 統一実装 |
 | `logging` | `init_subscriber` — `RUST_LOG` 対応の `tracing_subscriber::fmt` 初期化（CLI `main.rs` 用） |
+| `eval` *(feature `eval-harness`)* | `rurico` プリミティブと合成した検索評価ハーネス。`eval_harness` バイナリの裏側 (ADR 0002)。 |
+| `testing::hybrid` *(feature `test-support`)* | ハイブリッド検索における FTS↔vec 対称性のコントラクトアサーション。 |
 
 ## 使い方
 
@@ -21,6 +24,13 @@ sae/yomu/recall ツールチェーンで共有するモデルローディング�
 [dependencies]
 amici = { git = "https://github.com/thkt/amici", rev = "<rev>" }
 ```
+
+## Features
+
+| Feature | 効果 |
+| ------- | ---- |
+| `eval-harness` | `amici::eval` と `eval_harness` バイナリをビルド。`just eval-*` レシピが要求。 |
+| `test-support` | `amici::testing::hybrid` を公開。下流 crate が `[dev-dependencies]` でハイブリッド検索のコントラクトヘルパーを再利用できる。 |
 
 ## 開発
 
