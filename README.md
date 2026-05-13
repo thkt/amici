@@ -233,6 +233,27 @@ can write deterministic retry logic.
 > CI pipelines, and parent processes that branch on a specific number must
 > be updated. Announce the change in the CLI's release notes.
 
+#### Group 2 baseline (ADR-0066)
+
+ADR-0066 partitions the CLI suite into three groups by error topology and
+assigns each group a shared exit-code baseline. amici is the baseline for
+**Group 2 — local semantic search** (sae / yomu / recall / rurico).
+Downstream CLIs alias `amici::cli::exit_code::codes` so classification stays
+consistent across the group, and a metrics dashboard tracking the rate of
+`UNKNOWN` (104) can detect `anyhow::Error` swallowing or unclassified
+failures from a single value regardless of which Group 2 CLI emitted it.
+
+The `codes` module exposes two source ranges side-by-side:
+
+| Range  | Source                             | Codes                                                    |
+| ------ | ---------------------------------- | -------------------------------------------------------- |
+| 64–78  | sysexits.h                         | `USAGE`, `SOFTWARE`, `CANT_CREAT`, `IO_ERR`, `TEMP_FAIL` |
+| 80–119 | Project extension range (ADR-0066) | `UNKNOWN` (104)                                          |
+
+`codes::INTERNAL` is provided as an alias for `SOFTWARE` so call sites can use
+the name that ADR-0066's classification table uses — the numeric value is
+unchanged (70 = `EX_SOFTWARE`).
+
 ### Oracle mode
 
 > Requires the `eval-harness` Cargo feature.
