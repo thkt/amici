@@ -1,6 +1,6 @@
 # Pin BaselineSnapshot serde defaults to pre-existing behavior
 
-- Status: proposed
+- Status: accepted
 - Deciders: thkt
 - Date: 2026-05-14
 - Scope: [rust, evaluation]
@@ -110,7 +110,7 @@ Chosen option: "Module-doc + ADR で規律を明文化、新規フィールド�
 ### Reassessment Triggers
 
 - `BaselineSnapshot` を struct 廃止し schema-bound serializer (e.g. `prost`/`schemars`-driven) に切り替える場合 → 規律の射程が変わる
-- historical fixture-based test が CI gate として land し、規律が機械的強制になった場合 → ADR の役割が縮退、Implementation Guidelines のみに統合再評価
+- ~~historical fixture-based test が CI gate として land し、規律が機械的強制になった場合 → ADR の役割が縮退、Implementation Guidelines のみに統合再評価~~ — **PR #93 で fired、Decision Outcome 2 (`src/eval/baseline.rs` module-doc) + Decision Outcome 4 (`tests/fixtures/eval/historical/pre_serde_defaults.json` + `historical_baseline_resolves_serde_defaults_to_pre_existing_behavior` test) が land 済み。literal reading の「縮退、Implementation Guidelines のみに統合」は採用せず Accepted で維持: CI gate は既存 3 フィールド (aggregation / merge_config / normalization) の past behavior を mechanize するのみで、4 つ目以降のフィールド追加時に runtime default を割り当てるという future の失敗モードは捕捉できない (test は新規 field を assert しない)。新規フィールド追加 PR 時の「pre-existing-behavior か bump 同伴か」の判断は引き続き human cognitive gate (= ADR 本文 + review checklist) に依存する (2026-05-15)**
 - ~~`aggregation: String` が typed enum に昇格した場合 → 本 ADR の例示更新~~ — **PR #86 で fired、本 ADR の line 19 / 90 / 106 例示更新済み (2026-05-14 adr-drift scan PR-A)**
 
 ## References

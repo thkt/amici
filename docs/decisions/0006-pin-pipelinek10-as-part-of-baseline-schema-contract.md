@@ -1,6 +1,6 @@
 # Pin PIPELINE_K=10 as part of baseline schema contract
 
-- Status: proposed
+- Status: accepted
 - Deciders: thkt
 - Date: 2026-05-14
 - Scope: [rust, evaluation]
@@ -96,7 +96,7 @@ Chosen option: "PIPELINE_K=10 を baseline schema contract の一部として本
 - 業界標準で k≠10 (例: k=20) が agentic search の sensitivity sweet spot として確立した場合
 - fixture が 168 queries × 8 categories から大幅拡張され、k=10 では信号が薄まる場合
 - yomu / sae の downstream で k=10 では tier ranking 効果が見えなくなった場合
-- `verify-baseline` の自動 gate (上記 Implementation Guidelines) が land した場合、本 ADR の役割がレビュー gate から code-level gate へ移行 → ADR の自然消滅か Implementation Guidelines のみへ縮退を再評価
+- ~~`verify-baseline` の自動 gate (上記 Implementation Guidelines) が land した場合、本 ADR の役割がレビュー gate から code-level gate へ移行 → ADR の自然消滅か Implementation Guidelines のみへ縮退を再評価~~ — **PR #94 で fired、Decision Outcome 3 (`PIPELINE_K` doc comment) + Decision Outcome 4 (`validate_committed_baseline_envelope` の K mismatch gate) が land 済み。自然消滅 / 縮退 は採用せず Accepted で維持: (a) change protocol step (d) が本 ADR の supersede chain を前提とするため自然消滅は構造的に不可、(b) MADR section 必須項目を満たすため Implementation Guidelines 単独への縮退は不可。CI gate は stale baseline を reactive に検出するが、PIPELINE_K bump 時の change protocol 4 step は ADR が prescriptive に gating する役割を保持 (2026-05-15)**
 
 ## References
 
