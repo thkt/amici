@@ -101,7 +101,8 @@ pub fn escape_like(s: &str) -> String {
 ///
 /// Use this on the Rust side when post-filtering rows already narrowed by a
 /// `LIKE ? ESCAPE '\'` clause, so that SQL and Rust agree on case semantics.
-pub fn like_prefix_match(value: &str, prefix: &str) -> bool {
+#[allow(dead_code)] // SQL filter utility kept for future amici-internal callers.
+pub(crate) fn like_prefix_match(value: &str, prefix: &str) -> bool {
     value
         .as_bytes()
         .get(..prefix.len())
@@ -313,7 +314,8 @@ pub fn append_timestamp_cutoff_filter(
 /// timestamps and the caller wants a day-inclusive `before`.
 ///
 /// See [`append_eq_filter`] for the `column` security contract.
-pub fn append_date_string_cutoff_filter(
+#[allow(dead_code)] // SQL filter utility kept for future amici-internal callers.
+pub(crate) fn append_date_string_cutoff_filter(
     sql: &mut String,
     params: &mut Vec<Box<dyn ToSql>>,
     column: &'static str,
