@@ -219,8 +219,10 @@ Per-file summary: `keep 2 / downgrade 5 / drop 8 / bug-fix 1 (eval_harness.rs)`.
 
 ### ADR candidates (file via `/adr`)
 
-1. **ADR draft**: "Pin `PIPELINE_K=10` as part of the baseline schema contract" — covers reassessment trigger (when can K change), backfill protocol for old baselines, and recapture sequence.
-2. **ADR draft**: "`serde(default = ...)` historical-value discipline for `BaselineSnapshot` field additions" — covers the bump-vs-no-bump rule, the "pre-existing behavior" wording, and the linkage to `BASELINE_SCHEMA_VERSION`.
+Status: both ADRs landed in `docs/decisions/` (proposed) on 2026-05-14.
+
+1. **ADR draft**: "Pin `PIPELINE_K=10` as part of the baseline schema contract" — covers reassessment trigger (when can K change), backfill protocol for old baselines, and recapture sequence. — done (ADR-0006).
+2. **ADR draft**: "`serde(default = ...)` historical-value discipline for `BaselineSnapshot` field additions" — covers the bump-vs-no-bump rule, the "pre-existing behavior" wording, and the linkage to `BASELINE_SCHEMA_VERSION`. — done (ADR-0007).
 
 ### Documentation/comment fixes (no ADR)
 
@@ -234,12 +236,14 @@ Status: all 5 items landed via [PR #82](https://github.com/thkt/amici/pull/82) (
 
 ### Code fixes (type-system / lint)
 
-8. `src/storage/filter.rs::append_in_clause` → tighten `op: &str` to `op: &'static str` or `enum Op { In, NotIn }`.
-9. `src/storage/filter.rs` → visibility audit; narrow `pub` to `pub(crate)` per LANG.md guidance where downstream does not use the helper directly.
-10. `src/eval/pipeline.rs::index_corpus` → introduce typed `fn embedding_bytes(v: &[f32; EMBEDDING_DIMS]) -> &[u8]` to replace bare `bytemuck::cast_slice` and bind the schema-layout contract.
-11. `src/bin/eval_harness.rs::MLX_DEPENDENT_MODES` → wrap with `static_assertions::const_assert!` or a clippy custom rule to make membership mechanical.
-12. `src/eval/baseline.rs::aggregation` → promote `String` field to `enum AggregationKind` mirroring `BaselineKind` typed/closed-set discipline.
+Status: all 5 items landed across [PR #85](https://github.com/thkt/amici/pull/85), [#86](https://github.com/thkt/amici/pull/86), [#87](https://github.com/thkt/amici/pull/87), [#88](https://github.com/thkt/amici/pull/88), [#89](https://github.com/thkt/amici/pull/89) (merged 2026-05-14, tracked in issue #81).
+
+8. `src/storage/filter.rs::append_in_clause` → tighten `op: &str` to `op: &'static str` or `enum Op { In, NotIn }`. — done ([PR #87](https://github.com/thkt/amici/pull/87), adopted `enum Op { In, NotIn }`).
+9. `src/storage/filter.rs` → visibility audit; narrow `pub` to `pub(crate)` per LANG.md guidance where downstream does not use the helper directly. — done ([PR #88](https://github.com/thkt/amici/pull/88), narrowed `like_prefix_match` and `append_date_string_cutoff_filter`).
+10. `src/eval/pipeline.rs::index_corpus` → introduce typed `fn embedding_bytes(v: &[f32; EMBEDDING_DIMS]) -> &[u8]` to replace bare `bytemuck::cast_slice` and bind the schema-layout contract. — done ([PR #85](https://github.com/thkt/amici/pull/85)).
+11. `src/bin/eval_harness.rs::MLX_DEPENDENT_MODES` → wrap with `static_assertions::const_assert!` or a clippy custom rule to make membership mechanical. — done ([PR #89](https://github.com/thkt/amici/pull/89), used std `const _: () = assert!(...)` for zero new deps).
+12. `src/eval/baseline.rs::aggregation` → promote `String` field to `enum AggregationKind` mirroring `BaselineKind` typed/closed-set discipline. — done ([PR #86](https://github.com/thkt/amici/pull/86)).
 
 ### Bug investigation
 
-13. `src/bin/eval_harness.rs:L149-157` — Investigate `EXIT_REGRESSION/USAGE/INFRA` vs `amici::cli::exit_code::codes` (ADR-0066 baseline). Determine if pre-ADR-0066 leftover (replace with `codes::SOFTWARE`/`USAGE`/`TEMP_FAIL`) or intentional divergence (add 2-line explicit comment). Do not ADR until intent is clarified.
+13. `src/bin/eval_harness.rs:L149-157` — Investigate `EXIT_REGRESSION/USAGE/INFRA` vs `amici::cli::exit_code::codes` (ADR-0066 baseline). Determine if pre-ADR-0066 leftover (replace with `codes::SOFTWARE`/`USAGE`/`TEMP_FAIL`) or intentional divergence (add 2-line explicit comment). Do not ADR until intent is clarified. — done ([PR #84](https://github.com/thkt/amici/pull/84), intentional divergence; eval_harness is internal tooling not a Group 2 production CLI; 13-line divergence comment added).
