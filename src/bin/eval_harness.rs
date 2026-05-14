@@ -96,6 +96,22 @@ fn production_context()
     })
 }
 
+/// Load-bearing constant for the baseline.json schema contract (ADR-0006).
+/// The `*_at_k` metric names (`recall@10`, `mrr@10`, `ndcg@10`) and the
+/// committed `MetricResult.k` values for those metrics all derive from this
+/// value, so any bump silently invalidates every `tests/fixtures/eval/*.json`
+/// baseline.
+///
+/// Change protocol (ADR-0006 § Decision Outcome 2):
+/// - (a) bump `BASELINE_SCHEMA_VERSION`
+/// - (b) recapture every `tests/fixtures/eval/*.json` baseline
+/// - (c) append "PIPELINE_K change" row to ADR-0002 § Reassessment Triggers
+/// - (d) supersede ADR-0006 with a new ADR documenting the new value
+///
+/// `validate_committed_baseline_envelope` rejects a committed baseline whose
+/// recorded `MetricResult.k` disagrees with what `MetricSpec` declares for
+/// that metric name, so a stale baseline fails fast before model load
+/// (ADR-0006 § Implementation Guidelines 第 2 項).
 const PIPELINE_K: usize = 10;
 const SHUFFLE_SEED: u64 = 42;
 const BOOTSTRAP_RESAMPLES: usize = 1000;
@@ -1211,6 +1227,22 @@ fn validate_committed_baseline_envelope(
             committed.schema_version, BASELINE_SCHEMA_VERSION
         );
         return Err(EXIT_REGRESSION);
+    }
+    for metric in &committed.global {
+        if let Some(spec) = MetricSpec::ALL.iter().find(|s| s.name() == metric.name)
+            && metric.k != spec.k()
+        {
+            eprintln!(
+                "verify-baseline: failed — committed metric {:?} has k={} but \
+                 MetricSpec defines k={} (ADR-0006 schema contract); K mismatch \
+                 invalidates baseline semantics — regenerate via \
+                 {{capture-baseline | capture-oracle | replay-first-search}} before verifying",
+                metric.name,
+                metric.k,
+                spec.k()
+            );
+            return Err(EXIT_REGRESSION);
+        }
     }
     if let Some(expected_kind_raw) = kvs.get("kind") {
         let expected_kind = match parse_baseline_kind(expected_kind_raw) {
@@ -2496,6 +2528,33 @@ mod tests {
             result,
             Err(EXIT_REGRESSION),
             "FR-023/NFR-005: stale 1.2 baseline must EXIT_REGRESSION"
+        );
+    }
+
+    // T-ADR0006-005: verify_baseline_rejects_committed_metric_with_k_mismatch
+    //
+    // ADR-0006 § Implementation Guidelines 第 2 項: committed metric の
+    // `MetricResult.k` が `MetricSpec` で宣言された k と一致しない場合は
+    // PIPELINE_K bump 由来の stale baseline として `EXIT_REGRESSION`。
+    // 実装は ADR 本文 ("recall@k キー名から逆引き") ではなく `.k` field 直読 +
+    // `MetricSpec.k()` 比較 (string parse 不要、rename も downstream で別途検出)。
+    #[test]
+    fn verify_baseline_rejects_committed_metric_with_k_mismatch() {
+        let mut snap = snapshot_for_envelope_test(BASELINE_SCHEMA_VERSION, BaselineKind::Forward);
+        snap.global.push(MetricResult {
+            name: "recall@10".to_owned(),
+            k: 5,
+            point_estimate: 0.0,
+            ci_lower: 0.0,
+            ci_upper: 0.0,
+            uninformative: false,
+        });
+        let kvs = HashMap::new();
+        let result = validate_committed_baseline_envelope(&snap, &kvs);
+        assert_eq!(
+            result,
+            Err(EXIT_REGRESSION),
+            "ADR-0006: MetricSpec.k() と committed metric.k の不一致は EXIT_REGRESSION"
         );
     }
 
