@@ -147,17 +147,38 @@ pub fn append_like_prefix_filter(
     }
 }
 
+/// Whether [`append_in_clause`] builds an `IN` or `NOT IN` predicate.
+///
+/// Closed enum (rather than `op: &str`) so the SQL keyword set stays bound at
+/// compile time. Matches the module's `column: &'static str` discipline — every
+/// literal piece of SQL syntax is fixed at compile time, never threaded
+/// through a runtime string.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Op {
+    In,
+    NotIn,
+}
+
+impl Op {
+    fn as_sql(self) -> &'static str {
+        match self {
+            Self::In => "IN",
+            Self::NotIn => "NOT IN",
+        }
+    }
+}
+
 /// Appends `" AND {column} {op} (?, ?, ...)"` and boxes each item as a param.
 ///
 /// Private shared tail for the public `append_in_filter` / `append_include_ids`
 /// / `append_exclude_ids` helpers. Each public helper handles its own
 /// `None` / empty-set contract before delegating here, so this function
-/// assumes `iter` is non-empty. `op` is used verbatim ("IN" or "NOT IN").
+/// assumes `iter` is non-empty.
 fn append_in_clause<I>(
     sql: &mut String,
     params: &mut Vec<Box<dyn ToSql>>,
     column: &'static str,
-    op: &str,
+    op: Op,
     iter: I,
 ) where
     I: IntoIterator,
@@ -168,7 +189,7 @@ fn append_in_clause<I>(
     sql.push_str(" AND ");
     sql.push_str(column);
     sql.push(' ');
-    sql.push_str(op);
+    sql.push_str(op.as_sql());
     sql.push_str(" (");
     sql.push_str(&anon_placeholders(iter.len()));
     sql.push(')');
@@ -204,7 +225,7 @@ pub fn append_in_filter<T>(
         sql.push_str(" AND 1 = 0");
         return;
     }
-    append_in_clause(sql, params, column, "IN", values.iter().cloned());
+    append_in_clause(sql, params, column, Op::In, values.iter().cloned());
 }
 
 /// Appends `" AND {column} NOT IN (?, ?, ...)"` when `exclude_ids` is non-empty.
@@ -224,7 +245,7 @@ pub fn append_exclude_ids(
     if exclude_ids.is_empty() {
         return;
     }
-    append_in_clause(sql, params, column, "NOT IN", exclude_ids.iter().copied());
+    append_in_clause(sql, params, column, Op::NotIn, exclude_ids.iter().copied());
 }
 
 /// Appends an `AND` clause restricting `column` to `include_ids`.
@@ -253,7 +274,7 @@ pub fn append_include_ids(
         sql.push_str(" AND 1 = 0");
         return;
     }
-    append_in_clause(sql, params, column, "IN", include_ids.iter().copied());
+    append_in_clause(sql, params, column, Op::In, include_ids.iter().copied());
 }
 
 /// Appends `" AND {column} >= ?"` binding `cutoff_ms` when `Some`.
