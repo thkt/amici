@@ -3,6 +3,7 @@
 - Status: accepted
 - Deciders: thkt
 - Date: 2026-04-27
+- Scope: [rust, evaluation]
 - Confidence: high — supersedes the methodology accepted in rurico ADR 0003. Reference composition pattern is empirically established in `recall/src/hybrid.rs`; statistical significance via bootstrap CI on 140+ query fixtures is a well-known IR convention; mlx inference f32 drift across machines / mlx-rs versions is bounded by the regeneration tolerance encoded in `src/bin/eval_harness.rs::MetricSpec::tolerance`.
 
 ## Context and Problem Statement
