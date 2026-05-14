@@ -66,6 +66,16 @@ pub fn degraded_reason_user_note(reason: DegradedReason) -> Option<&'static str>
 /// The structured warn event carries `error`, `reason`, and `context` fields
 /// with the message `"operation degraded"`.
 ///
+/// # Anti-pattern
+///
+/// Never collapse a typed error to a [`DegradedReason`] with a bare
+/// `.map_err(|_| DegradedReason::X)`: the underlying cause is dropped from
+/// the warn event, so log consumers cannot tell `EmbedError::Backend` apart
+/// from a cache-lookup permission error once both arrive as `ProbeFailed`.
+/// PR review will not flag the regression because the function's return
+/// type is unchanged. Always route the conversion through this helper (or
+/// [`record_degraded`] when there is no underlying error to preserve).
+///
 /// # Examples
 ///
 /// ```no_run
@@ -96,6 +106,14 @@ pub fn degrade_with_warn<E: fmt::Display>(
 ///
 /// The structured warn event carries `reason` and `context` fields with the
 /// message `"operation degraded"`.
+///
+/// # Anti-pattern
+///
+/// Do not pre-collapse a `Result<_, OtherError>` to a [`DegradedReason`]
+/// via `.map_err(|_| DegradedReason::X)` and then call this fn — the
+/// `error` field that would let log consumers diagnose the cause is gone
+/// before the warn event is emitted. Use [`degrade_with_warn`] inside the
+/// `map_err` so the original error stays in the structured log.
 ///
 /// # Examples
 ///
@@ -129,6 +147,17 @@ pub enum ModelLoad<T> {
     #[default]
     Absent,
     /// The model could not be loaded. The `String` contains a human-readable error message.
+    ///
+    /// # Stability
+    ///
+    /// The erasure to `String` is deliberate — the source error type
+    /// ([`ModelDownloadError`], `ModelInitError`, or a probe failure) is
+    /// flattened so callers can render the message without knowing the
+    /// originating layer. Downstream CLIs (sae / yomu / recall) surface this
+    /// string verbatim to the user via [`Self::emit_load_hint`], so the
+    /// wording is part of the user-visible API surface. Changing the message
+    /// shape is a behaviour change for every downstream consumer, not an
+    /// internal log refactor.
     Failed(String),
 }
 
@@ -209,6 +238,14 @@ impl Error for ModelDownloadError {}
 /// Shows a spinner on stderr during download and probe phases.
 ///
 /// # Prerequisites
+///
+/// "Verify" here means **probe-load**: after the download, the fn calls
+/// [`Embedder::probe`] and [`Embedder::new`] to confirm the artifacts
+/// actually load on this machine. It is **not** a content-hash check —
+/// artifact integrity is delegated to `rurico::embed::download_model`,
+/// whose own checksum step runs before this fn's post-download probe. A
+/// successful return guarantees "the model loads here and now", not
+/// "the downloaded bytes match the registry manifest".
 ///
 /// The calling binary must invoke `rurico::handle_probe_if_needed()`
 /// at the very start of `main()`. Without it, the post-download probe returns

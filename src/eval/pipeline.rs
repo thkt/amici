@@ -193,6 +193,18 @@ where
 /// is fixed to [`MaxChunkAggregator`] — ranking-aware aggregators (e.g.
 /// [`IdentityAggregator`]) are not selectable.
 ///
+/// # Do not DRY-merge with [`evaluate`]
+///
+/// The separate signature **is** the FR-008 / FR-010 guard: a refactor that
+/// adds `Option<&R>` reranker / `Option<&A>` aggregator parameters to fold
+/// this fn into [`evaluate`] silently breaks the compile-time guarantee
+/// that the replay path never invokes rerank or a ranking-aware aggregator.
+/// The runtime behaviour would still pass every existing test (passing
+/// `None` matches the current shape), so the regression is invisible until
+/// a caller threads through `Some(reranker)` by mistake. Keep the two
+/// entry points distinct; share helpers via [`run_stage1_plus_2`] and
+/// [`setup_pipeline_connection`] instead.
+///
 /// # Errors
 ///
 /// See [`PipelineError`] variants — same surface as [`evaluate`] minus

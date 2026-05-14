@@ -4,6 +4,21 @@
 //! `params: &mut Vec<Box<dyn ToSql>>`, appending an `AND`-prefixed predicate
 //! that relies on the caller's base clause (typically `WHERE 1 = 1`).
 //!
+//! # Filter contract
+//!
+//! `Option<T>`-receiving helpers split the empty-input case explicitly:
+//!
+//! - `None` → no-op (the caller did not request this filter).
+//! - `Some(empty)` → `" AND 1 = 0"` (the caller asked for "match nothing").
+//! - `Some(non-empty)` → the normal predicate.
+//!
+//! Helpers receiving a plain non-`Option` collection (e.g. `&HashSet`) treat
+//! an empty collection as no-op, because "exclude nothing" or "no LIKE
+//! pattern" is the only sensible reading at that call site. New helpers must
+//! follow the same split before adding new variants — silently picking a
+//! different convention would let callers conflate "no filter" with "match
+//! nothing".
+//!
 //! # Security
 //!
 //! All `column` parameters are `&'static str`. The compiler rejects runtime
