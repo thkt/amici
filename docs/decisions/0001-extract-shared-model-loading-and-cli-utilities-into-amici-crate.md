@@ -53,6 +53,8 @@ Chosen option: Option 1（amiciクレートの新設）。バックポート作�
 
 ## Implementation Plan
 
+Implementation Plan は initial extraction set を示す。後続の追加は ADR-0005 の judgment table (line 50-56) に従って判断する。
+
 ```text
 amici/src/
 ├── lib.rs
