@@ -7,6 +7,28 @@
 //! [`MetricResult`] reuses the [`serde::Serialize`] / [`serde::Deserialize`]
 //! derive added on the same type in `metrics.rs`; this module's
 //! [`BaselineSnapshot`] composes it directly so its own derive is sufficient.
+//!
+//! # serde default discipline (ADR-0007)
+//!
+//! 新フィールドを [`BaselineSnapshot`] に追加するとき、`#[serde(default = "fn_name")]`
+//! を必ず付与し、その default 関数は **そのフィールドが存在しなかった時点での実質挙動
+//! (pre-existing behavior)** を返す。runtime default (e.g. `Foo::default()`) を割り
+//! 当てる場合は、それが historical baseline の実質挙動と一致する根拠を PR 説明または
+//! コード上で示すか、[`BASELINE_SCHEMA_VERSION`] を bump する。
+//!
+//! 既存 3 フィールドは本規律に従う:
+//!
+//! - `aggregation`: [`AggregationKind::Identity`] を返す ([`default_aggregation_kind`])
+//! - `merge_config`: `HybridSearchConfig::default()` 同等 (pre-merge-config 時代と一致、`#[serde(default)]`)
+//! - `normalization`: [`pre_phase_5_disabled`] (all OFF、runtime `QueryNormalizationConfig::default` の all ON とは **異なる** historical 側採用)
+//!
+//! 規律は historical baseline (3 フィールド欠落) を `tests/fixtures/eval/historical/`
+//! 配下に pin した unit test (`historical_baseline_resolves_serde_defaults_to_pre_existing_behavior`)
+//! で、default 経由の deserialize が pre-existing behavior と一致することを CI で gate する。
+//!
+//! 規律の根拠と新フィールド追加手順は ADR-0007
+//! (`docs/decisions/0007-pin-baselinesnapshot-serde-defaults-to-pre-existing-behavior.md`)
+//! 参照。
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -656,6 +678,50 @@ mod tests {
         assert!(
             !dir.path().join(".artifact.json.tmp").exists(),
             "temp file must be renamed away"
+        );
+    }
+
+    // ADR-0007 #9: historical_baseline_resolves_serde_defaults_to_pre_existing_behavior
+    //
+    // §Decision Outcome 4 + §Implementation Guidelines step 4: field-less
+    // historical baseline (`aggregation` / `merge_config` / `normalization` 3
+    // フィールドすべて欠落) を deserialize し、各 serde default が
+    // pre-existing behavior と等価な値に解決されることを pin。本 test が fail =
+    // 既存 default 関数のいずれかが pre-existing behavior と乖離した = 規律違反、
+    // ADR-0007 の bump policy 前提が崩れる。
+    #[test]
+    fn historical_baseline_resolves_serde_defaults_to_pre_existing_behavior() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/eval/historical/pre_serde_defaults.json");
+        let text =
+            fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        let parsed: BaselineSnapshot = serde_json::from_str(&text).unwrap_or_else(|e| {
+            panic!(
+                "historical fixture must deserialise via serde defaults (3 missing \
+                 fields each resolved by their `#[serde(default = ...)]`): {e}"
+            )
+        });
+
+        assert_eq!(
+            parsed.aggregation,
+            AggregationKind::Identity,
+            "ADR-0007: pre-aggregation historical baseline must resolve `aggregation` \
+             via `default_aggregation_kind` to `AggregationKind::Identity` \
+             (== pre-existing behavior, NOT a runtime default that drifted)"
+        );
+        assert_eq!(
+            parsed.merge_config,
+            HybridSearchConfig::default(),
+            "ADR-0007: pre-merge-config historical baseline must resolve `merge_config` \
+             via `#[serde(default)]` to `HybridSearchConfig::default()` \
+             (rrf_k=60, fts/vector weights=1.0 — pre-merge-config 時代の実質挙動)"
+        );
+        assert_eq!(
+            parsed.normalization,
+            pre_phase_5_disabled(),
+            "ADR-0007: pre-normalization historical baseline must resolve `normalization` \
+             via `pre_phase_5_disabled` to all-OFF \
+             (NOT runtime `QueryNormalizationConfig::default` which is all-ON)"
         );
     }
 }
