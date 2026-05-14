@@ -224,11 +224,13 @@ Per-file summary: `keep 2 / downgrade 5 / drop 8 / bug-fix 1 (eval_harness.rs)`.
 
 ### Documentation/comment fixes (no ADR)
 
-3. `src/storage/filter.rs` module doc → add `# Filter contract` paragraph covering `Option<>` `None=no-op / Some(empty)=1=0` rule.
-4. `src/eval/pipeline.rs::evaluate_first_search_replay` docstring → add "do not DRY-merge with `evaluate`; the signature is the FR-008/010 compile-time guard".
-5. `src/model.rs::ModelLoad::Failed` rustdoc → add `# Stability` note on stringly-typed payload + downstream UX coupling.
-6. `src/model.rs::degrade_with_warn` rustdoc → add `# Examples` warning "never collapse with bare `.map_err(|_| Reason::X)`".
-7. `src/model.rs::download_and_verify_model` rustdoc → add to `# Prerequisites` "verify means probe-load; hash check is delegated to rurico".
+Status: all 5 items landed via [PR #82](https://github.com/thkt/amici/pull/82) (merged 2026-05-14, tracked in issue #81).
+
+3. `src/storage/filter.rs` module doc → add `# Filter contract` paragraph covering `Option<>` `None=no-op / Some(empty)=1=0` rule. — done (PR #82).
+4. `src/eval/pipeline.rs::evaluate_first_search_replay` docstring → add "do not DRY-merge with `evaluate`; the signature is the FR-008/010 compile-time guard". — done (PR #82).
+5. `src/model.rs::ModelLoad::Failed` rustdoc → add `# Stability` note on stringly-typed payload + downstream UX coupling. — done (PR #82).
+6. `src/model.rs::degrade_with_warn` rustdoc → add `# Examples` warning "never collapse with bare `.map_err(|_| Reason::X)`". — done (PR #82, covers `record_degraded` as well).
+7. `src/model.rs::download_and_verify_model` rustdoc → add to `# Prerequisites` "verify means probe-load; hash check is delegated to rurico". — done (PR #82).
 
 ### Code fixes (type-system / lint)
 
