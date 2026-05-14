@@ -16,7 +16,7 @@
 
 すなわち serde default は「runtime default」ではなく「pre-existing-behavior (そのフィールドが存在しなかった時点での実質挙動)」を指す。runtime default を割り当てると、historical な baseline.json の意味が "そのフィールドが現在の default 設定で評価された" に silently rewrite される。
 
-この規律は 3 フィールド (`aggregation` = `"identity"`, `merge_config` = `HybridSearchConfig::default()`, `normalization` = `pre_phase_5_disabled`) で守られているが、module-level の規約として文書化されていない。`BASELINE_SCHEMA_VERSION` の bump policy (`pub const BASELINE_SCHEMA_VERSION: &str = "1.3";` のコメント参照) は「breaking change で bump」と定めるが、本規律 (= "default は pre-existing-behavior でなければ silently 意味が変わる") が崩れると bump policy 自体が機能しなくなる。
+この規律は 3 フィールド (`aggregation` = `AggregationKind::Identity`, `merge_config` = `HybridSearchConfig::default()`, `normalization` = `pre_phase_5_disabled`) で守られているが、module-level の規約として文書化されていない。`BASELINE_SCHEMA_VERSION` の bump policy (`pub const BASELINE_SCHEMA_VERSION: &str = "1.3";` のコメント参照) は「breaking change で bump」と定めるが、本規律 (= "default は pre-existing-behavior でなければ silently 意味が変わる") が崩れると bump policy 自体が機能しなくなる。
 
 将来 4 つ目のフィールドを追加する contributor が runtime default を割り当てれば、historical baseline は新しい意味で読み直され、regression gate が誤検知/見逃しを起こす。型・lint で防げず、テストも難しい (historical な field-less ファイル fixture を pin する必要がある)。
 
@@ -87,7 +87,7 @@ Chosen option: "Module-doc + ADR で規律を明文化、新規フィールド�
 
 ### Trade-offs
 
-`BaselineKind` (closed enum, `#[serde(rename_all = "snake_case")]`) と `aggregation: String` (open string + serde default) の typed/untyped 非対称は、本 ADR の射程外として残す (audit report #56 で別途 type-system fix 候補)。本 ADR は default **値の選び方** に関する規律のみを定める。
+`BaselineKind` (closed enum, `#[serde(rename_all = "snake_case")]`) と `aggregation` フィールドの typed/untyped 非対称は **PR #86 で resolved** — `aggregation` は `AggregationKind` typed enum に昇格し、wire form (`identity` / `max-chunk` / `dedupe` / `topk-average:k` / `none`) は manual `Serialize` / `Deserialize` impl で controlled (`src/eval/baseline.rs:117-171`)。audit report #56 で別途 type-system fix 候補と記録していた gap は閉じた。本 ADR は default **値の選び方** に関する規律のみを定める。
 
 ### Implementation Guidelines
 
@@ -103,7 +103,7 @@ Chosen option: "Module-doc + ADR で規律を明文化、新規フィールド�
 
 | フィールド (追加時の文脈) | serde default | runtime default | 採用 default |
 | ------------- | ------------- | --------------- | ------------ |
-| `aggregation` (pre-aggregation baseline 存在) | `"identity"` | `"identity"` | `"identity"` (両者一致、`default_aggregation_kind`) |
+| `aggregation` (pre-aggregation baseline 存在) | `AggregationKind::Identity` | `AggregationKind::Identity` | `AggregationKind::Identity` (両者一致、`default_aggregation_kind`) |
 | `merge_config` (pre-merge-config baseline 存在) | `HybridSearchConfig::default()` (`rrf_k=60`, weights=1.0) | 同上 | runtime default 同等 (`#[serde(default)]`) |
 | `normalization` (pre-normalization baseline 存在) | `pre_phase_5_disabled` (all OFF) | `QueryNormalizationConfig::default` (all ON) | `pre_phase_5_disabled` (両者異なる、historical 側採用) |
 
@@ -111,7 +111,7 @@ Chosen option: "Module-doc + ADR で規律を明文化、新規フィールド�
 
 - `BaselineSnapshot` を struct 廃止し schema-bound serializer (e.g. `prost`/`schemars`-driven) に切り替える場合 → 規律の射程が変わる
 - historical fixture-based test が CI gate として land し、規律が機械的強制になった場合 → ADR の役割が縮退、Implementation Guidelines のみに統合再評価
-- `aggregation: String` が typed enum に昇格した場合 → 本 ADR の例示更新
+- ~~`aggregation: String` が typed enum に昇格した場合 → 本 ADR の例示更新~~ — **PR #86 で fired、本 ADR の line 19 / 90 / 106 例示更新済み (2026-05-14 adr-drift scan PR-A)**
 
 ## References
 
