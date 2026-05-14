@@ -9,13 +9,14 @@
 //! [`BaselineSnapshot`] composes it directly so its own derive is sufficient.
 
 use std::collections::BTreeMap;
+use std::fmt;
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::Path;
 
 use rurico::retrieval::HybridSearchConfig;
 use rurico::storage::{QueryNormalizationConfig, pre_phase_5_disabled};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de};
 
 use crate::eval::metrics::MetricResult;
 
@@ -90,6 +91,85 @@ pub enum BaselineKind {
     FirstSearchReplay,
 }
 
+/// Stage 3 aggregation strategy recorded on a [`BaselineSnapshot`].
+///
+/// Closed wire-format contract — every reader must handle every variant
+/// (no `#[non_exhaustive]`) so a baseline produced by a newer harness
+/// fails to deserialise rather than silently dropping an unknown strategy.
+///
+/// The mapping to JSON strings is intentionally **not** `serde(rename_all)`-driven:
+/// `TopKAverage(k)` carries a parameter that has to round-trip through the
+/// wire form as `"topk-average:k"`. See the [`Serialize`] / [`Deserialize`]
+/// impls below for the exact mapping.
+///
+/// | Variant         | JSON wire form     | Notes                                  |
+/// | --------------- | ------------------ | -------------------------------------- |
+/// | `Identity`      | `"identity"`       | Pre-aggregation default                |
+/// | `MaxChunk`      | `"max-chunk"`      | Parent rollup, max child score         |
+/// | `Dedupe`        | `"dedupe"`         | Drop sibling chunks of the same parent |
+/// | `TopKAverage(k)`| `"topk-average:k"` | Average top-`k` chunks per parent      |
+/// | `NotApplicable` | `"none"`           | BR-003 marker for FirstSearchReplay    |
+///
+/// Bare `"topk-average"` (no `:k` suffix) is **rejected** during deserialise;
+/// pre-fix baselines that encoded the strategy without `k` would otherwise
+/// silently verify against a different `k` than they were captured at. No
+/// committed fixture uses the bare form.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AggregationKind {
+    Identity,
+    MaxChunk,
+    Dedupe,
+    TopKAverage(usize),
+    /// BR-003 marker for [`BaselineKind::FirstSearchReplay`] — Stage 3 fixes
+    /// `MaxChunkAggregator` outside the parameterised set, so no aggregator
+    /// kind applies.
+    NotApplicable,
+}
+
+impl fmt::Display for AggregationKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Identity => f.write_str("identity"),
+            Self::MaxChunk => f.write_str("max-chunk"),
+            Self::Dedupe => f.write_str("dedupe"),
+            Self::TopKAverage(k) => write!(f, "topk-average:{k}"),
+            Self::NotApplicable => f.write_str("none"),
+        }
+    }
+}
+
+impl Serialize for AggregationKind {
+    fn serialize<S: serde::Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
+        ser.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for AggregationKind {
+    fn deserialize<D: serde::Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(de)?;
+        match s.as_str() {
+            "identity" => Ok(Self::Identity),
+            "max-chunk" => Ok(Self::MaxChunk),
+            "dedupe" => Ok(Self::Dedupe),
+            "none" => Ok(Self::NotApplicable),
+            "topk-average" => Err(de::Error::custom(
+                "legacy bare 'topk-average' aggregation marker without ':k' suffix \
+                 — recapture the baseline so the k parameter is preserved",
+            )),
+            other => match other.strip_prefix("topk-average:") {
+                Some(k_str) => k_str.parse::<usize>().map(Self::TopKAverage).map_err(|e| {
+                    de::Error::custom(format!(
+                        "topk-average:k parse error in baseline aggregation: {e}"
+                    ))
+                }),
+                None => Err(de::Error::custom(format!(
+                    "unknown aggregation marker {other:?}"
+                ))),
+            },
+        }
+    }
+}
+
 /// Frozen baseline produced by `eval_harness capture-baseline` and verified
 /// later by `eval_harness verify-baseline`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -119,10 +199,11 @@ pub struct BaselineSnapshot {
     /// Stage 3 aggregation strategy used for capture.
     ///
     /// Pre-aggregation baselines lack this field; `serde(default)` resolves
-    /// it to `"identity"` so existing committed baselines round-trip.
-    /// `verify-baseline` reads it back to dispatch the same aggregator.
+    /// it to [`AggregationKind::Identity`] so existing committed baselines
+    /// round-trip. `verify-baseline` reads it back to dispatch the same
+    /// aggregator.
     #[serde(default = "default_aggregation_kind")]
-    pub aggregation: String,
+    pub aggregation: AggregationKind,
     /// Stage 2 hybrid scoring config used for capture.
     ///
     /// Pre-merge-config baselines lack this field; `serde(default)`
@@ -149,8 +230,8 @@ pub struct BaselineSnapshot {
     pub latency_p95_ms: f64,
 }
 
-fn default_aggregation_kind() -> String {
-    "identity".to_owned()
+fn default_aggregation_kind() -> AggregationKind {
+    AggregationKind::Identity
 }
 
 /// Errors surfaced when writing a [`BaselineSnapshot`].
@@ -459,7 +540,7 @@ mod tests {
             model_revision: "rev".to_owned(),
             mlx_rs_version: "0.0.0".to_owned(),
             fixture_hash: "fnv1a64:0".to_owned(),
-            aggregation: "none".to_owned(),
+            aggregation: AggregationKind::NotApplicable,
             merge_config: HybridSearchConfig::default(),
             normalization: pre_phase_5_disabled(),
             global: vec![],
@@ -472,8 +553,9 @@ mod tests {
         assert_eq!(parsed.kind, BaselineKind::FirstSearchReplay);
         assert_eq!(parsed.captured_with, "eval_harness replay-first-search");
         assert_eq!(
-            parsed.aggregation, "none",
-            "BR-003: aggregation marker is \"none\" for FirstSearchReplay"
+            parsed.aggregation,
+            AggregationKind::NotApplicable,
+            "BR-003: aggregation marker is NotApplicable for FirstSearchReplay"
         );
     }
 
@@ -517,6 +599,44 @@ mod tests {
             assert_eq!(
                 parsed.kind, expected_kind,
                 "{name} kind must be {expected_kind:?}"
+            );
+        }
+    }
+
+    // T-081-002: aggregation_kind_roundtrips_committed_fixtures
+    //
+    // Issue #81 Code fix #10: lock in that the typed [`AggregationKind`] enum
+    // deserialises every committed baseline fixture to the expected variant
+    // **and** re-serialises to a byte-equivalent JSON literal. Catches the
+    // most likely regression on this PR — a serde wire-form change that
+    // silently rewrites the meaning of historical baselines.
+    #[test]
+    fn aggregation_kind_roundtrips_committed_fixtures() {
+        let fixture_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/eval");
+        for (name, expected_kind) in [
+            ("baseline.json", AggregationKind::Identity),
+            ("oracle_baseline.json", AggregationKind::Identity),
+            (
+                "first_search_replay_baseline.json",
+                AggregationKind::NotApplicable,
+            ),
+        ] {
+            let path = fixture_dir.join(name);
+            let text = fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+            let snap: BaselineSnapshot = serde_json::from_str(&text)
+                .unwrap_or_else(|e| panic!("{name} must deserialise: {e}"));
+            assert_eq!(
+                snap.aggregation, expected_kind,
+                "{name}: aggregation must deserialise to {expected_kind:?}"
+            );
+            let reserialized = serde_json::to_value(snap.aggregation)
+                .unwrap_or_else(|e| panic!("{name}: serialise aggregation: {e}"));
+            let original: serde_json::Value = serde_json::from_str(&text)
+                .unwrap_or_else(|e| panic!("{name}: parse as Value: {e}"));
+            assert_eq!(
+                reserialized, original["aggregation"],
+                "{name}: aggregation field must round-trip byte-equivalent JSON"
             );
         }
     }

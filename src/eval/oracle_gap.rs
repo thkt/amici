@@ -219,8 +219,8 @@ fn enforce_pipeline_config_match(
     if baseline.aggregation != oracle.aggregation {
         return Err(OracleGapError::PipelineConfigMismatch {
             field: "aggregation",
-            baseline: baseline.aggregation.clone(),
-            oracle: oracle.aggregation.clone(),
+            baseline: baseline.aggregation.to_string(),
+            oracle: oracle.aggregation.to_string(),
         });
     }
     if baseline.merge_config != oracle.merge_config {

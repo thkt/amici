@@ -44,7 +44,9 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    use crate::eval::baseline::{BASELINE_SCHEMA_VERSION, BaselineKind, BaselineSnapshot};
+    use crate::eval::baseline::{
+        AggregationKind, BASELINE_SCHEMA_VERSION, BaselineKind, BaselineSnapshot,
+    };
 
     /// Build a minimal [`BaselineSnapshot`] with deterministic literal
     /// stub values. Only the round-trip shape is exercised, so each
@@ -59,7 +61,7 @@ mod tests {
             model_revision: "test-rev".to_owned(),
             mlx_rs_version: "0.0".to_owned(),
             fixture_hash: "fnv1a64:0".to_owned(),
-            aggregation: "identity".to_owned(),
+            aggregation: AggregationKind::Identity,
             merge_config: HybridSearchConfig::default(),
             normalization: pre_phase_5_disabled(),
             global: Vec::new(),

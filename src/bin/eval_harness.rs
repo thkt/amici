@@ -34,8 +34,8 @@ use rand_chacha::ChaCha8Rng;
 
 use amici::eval::annotation::{ANNOTATION_SCHEMA_VERSION, Entry, Provenance, Session};
 use amici::eval::baseline::{
-    BASELINE_SCHEMA_VERSION, BaselineKind, BaselineSnapshot, atomic_write, build_metric_result,
-    write_json,
+    AggregationKind, BASELINE_SCHEMA_VERSION, BaselineKind, BaselineSnapshot, atomic_write,
+    build_metric_result, write_json,
 };
 use amici::eval::fixture::{
     EvalDocument, EvalQuery, load_documents, load_known_answers, load_queries,
@@ -127,17 +127,9 @@ const VALID_EVALUATE_KINDS: &[&str] = &[
 /// only appears in one place across argv validation and dispatch.
 const ORACLE_KIND_SUFFIX: &str = "_oracle";
 
-/// BR-003 marker written to [`BaselineSnapshot::aggregation`] for
-/// [`BaselineKind::FirstSearchReplay`]. Stage 3 runs `MaxChunkAggregator`
-/// only — no ranking-aware aggregator is invoked, so the field has no
-/// `AggregationKind::name()` to record. Kept as a constant so the
-/// production capture and the test helper that mirrors it share one
-/// source of truth.
-const AGGREGATION_NONE: &str = "none";
-
 /// Closed set of Stage 3 aggregation kinds accepted by `aggregation=...`.
-/// Anchors argv validation and round-tripping with the `aggregation` field
-/// on [`BaselineSnapshot`].
+/// Anchors argv validation; the wire format on [`BaselineSnapshot`] is owned
+/// by [`AggregationKind`] in `amici::eval::baseline`.
 const VALID_AGGREGATION_KINDS: &[&str] = &["identity", "max-chunk", "dedupe", "topk-average"];
 
 /// Default `k` for the `topk-average` strategy when no `topk_k=` override is
@@ -212,31 +204,22 @@ fn parse_merge_config_from_kvs(
     Ok(config)
 }
 
-/// Closed set of Stage 3 aggregation kinds. Anchors `aggregation=` argv
-/// validation, the JSON `aggregation` field on [`BaselineSnapshot`], and
-/// [`run_verify_baseline`]'s reverse lookup of which strategy to dispatch.
+/// Runtime spec for Stage 3 aggregation. Carries the `k` parameter for
+/// `TopKAverage`, which the storage-side [`AggregationKind`] preserves on
+/// the wire as `"topk-average:k"`.
+///
+/// Binary-local; the JSON wire form is owned by [`AggregationKind`] in
+/// `amici::eval::baseline`. Convert at the boundary via [`From`] /
+/// [`TryFrom`] to keep argv parsing and storage concerns separate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AggregationKind {
+enum AggregationSpec {
     Identity,
     MaxChunk,
     Dedupe,
     TopKAverage(usize),
 }
 
-impl AggregationKind {
-    /// Stable label written to `BaselineSnapshot.aggregation`. `TopKAverage`
-    /// encodes `k` as `"topk-average:K"` so a baseline captured with a
-    /// non-default `k` round-trips through [`Self::from_name`] without
-    /// silently falling back to [`DEFAULT_TOPK_AVERAGE_K`] at verify time.
-    fn name(self) -> String {
-        match self {
-            Self::Identity => "identity".to_owned(),
-            Self::MaxChunk => "max-chunk".to_owned(),
-            Self::Dedupe => "dedupe".to_owned(),
-            Self::TopKAverage(k) => format!("topk-average:{k}"),
-        }
-    }
-
+impl AggregationSpec {
     /// Parse `aggregation=<kind>` (and optional `topk_k=<n>`) from argv `kvs`.
     /// Returns `Self::Identity` when the key is absent so callers that don't
     /// pass the flag preserve the pre-Phase-3 behaviour.
@@ -263,26 +246,38 @@ impl AggregationKind {
             )),
         }
     }
+}
 
-    /// Resolve `BaselineSnapshot.aggregation` back to a dispatchable kind for
-    /// `verify-baseline`. Recognises both the encoded `"topk-average:K"` form
-    /// (post-fix) and the legacy bare `"topk-average"` form (pre-fix
-    /// baselines fall back to [`DEFAULT_TOPK_AVERAGE_K`]).
-    fn from_name(name: &str) -> Result<Self, String> {
-        match name {
-            "identity" => Ok(Self::Identity),
-            "max-chunk" => Ok(Self::MaxChunk),
-            "dedupe" => Ok(Self::Dedupe),
-            "topk-average" => Ok(Self::TopKAverage(DEFAULT_TOPK_AVERAGE_K)),
-            other => match other.strip_prefix("topk-average:") {
-                Some(k_str) => k_str
-                    .parse::<usize>()
-                    .map(Self::TopKAverage)
-                    .map_err(|e| format!("topk-average:K parse error in baseline: {e}")),
-                None => Err(format!(
-                    "unknown aggregation in baseline: {other:?}; expected one of {VALID_AGGREGATION_KINDS:?}"
-                )),
-            },
+impl From<AggregationSpec> for AggregationKind {
+    fn from(spec: AggregationSpec) -> Self {
+        match spec {
+            AggregationSpec::Identity => Self::Identity,
+            AggregationSpec::MaxChunk => Self::MaxChunk,
+            AggregationSpec::Dedupe => Self::Dedupe,
+            AggregationSpec::TopKAverage(k) => Self::TopKAverage(k),
+        }
+    }
+}
+
+impl TryFrom<AggregationKind> for AggregationSpec {
+    type Error = String;
+
+    /// Lower a storage-side [`AggregationKind`] back to a runtime spec for
+    /// `verify-baseline` dispatch. [`AggregationKind::NotApplicable`] is the
+    /// FirstSearchReplay marker and has no Stage 3 dispatch counterpart, so
+    /// it is rejected explicitly rather than silently collapsing to a
+    /// runtime default.
+    fn try_from(kind: AggregationKind) -> Result<Self, Self::Error> {
+        match kind {
+            AggregationKind::Identity => Ok(Self::Identity),
+            AggregationKind::MaxChunk => Ok(Self::MaxChunk),
+            AggregationKind::Dedupe => Ok(Self::Dedupe),
+            AggregationKind::TopKAverage(k) => Ok(Self::TopKAverage(k)),
+            AggregationKind::NotApplicable => Err(
+                "AggregationKind::NotApplicable cannot dispatch as a runtime AggregationSpec \
+                 — it is the FirstSearchReplay-only marker; use replay-first-search instead"
+                    .to_owned(),
+            ),
         }
     }
 }
@@ -298,7 +293,7 @@ fn dispatch_pipeline<E, R>(
     queries: &[EvalQuery],
     embedder: &E,
     reranker: Option<&R>,
-    aggregation: AggregationKind,
+    aggregation: AggregationSpec,
     merge_config: &HybridSearchConfig,
     normalization: &QueryNormalizationConfig,
     config: &PipelineConfig,
@@ -308,7 +303,7 @@ where
     R: Rerank,
 {
     match aggregation {
-        AggregationKind::Identity => run_pipeline(
+        AggregationSpec::Identity => run_pipeline(
             corpus,
             queries,
             embedder,
@@ -318,7 +313,7 @@ where
             normalization,
             config,
         ),
-        AggregationKind::MaxChunk => run_pipeline(
+        AggregationSpec::MaxChunk => run_pipeline(
             corpus,
             queries,
             embedder,
@@ -328,7 +323,7 @@ where
             normalization,
             config,
         ),
-        AggregationKind::Dedupe => run_pipeline(
+        AggregationSpec::Dedupe => run_pipeline(
             corpus,
             queries,
             embedder,
@@ -338,7 +333,7 @@ where
             normalization,
             config,
         ),
-        AggregationKind::TopKAverage(k) => run_pipeline(
+        AggregationSpec::TopKAverage(k) => run_pipeline(
             corpus,
             queries,
             embedder,
@@ -361,7 +356,7 @@ fn dispatch_oracle_pipeline<E, R>(
     queries: &[EvalQuery],
     embedder: &E,
     reranker: Option<&R>,
-    aggregation: AggregationKind,
+    aggregation: AggregationSpec,
     merge_config: &HybridSearchConfig,
     normalization: &QueryNormalizationConfig,
     config: &PipelineConfig,
@@ -371,7 +366,7 @@ where
     R: Rerank,
 {
     match aggregation {
-        AggregationKind::Identity => evaluate_oracle(
+        AggregationSpec::Identity => evaluate_oracle(
             corpus,
             queries,
             embedder,
@@ -381,7 +376,7 @@ where
             normalization,
             config,
         ),
-        AggregationKind::MaxChunk => evaluate_oracle(
+        AggregationSpec::MaxChunk => evaluate_oracle(
             corpus,
             queries,
             embedder,
@@ -391,7 +386,7 @@ where
             normalization,
             config,
         ),
-        AggregationKind::Dedupe => evaluate_oracle(
+        AggregationSpec::Dedupe => evaluate_oracle(
             corpus,
             queries,
             embedder,
@@ -401,7 +396,7 @@ where
             normalization,
             config,
         ),
-        AggregationKind::TopKAverage(k) => evaluate_oracle(
+        AggregationSpec::TopKAverage(k) => evaluate_oracle(
             corpus,
             queries,
             embedder,
@@ -597,7 +592,7 @@ fn run_evaluate(kvs: &HashMap<String, String>) -> ExitCode {
         eprintln!("evaluate: unknown kind {kind:?}; expected one of {VALID_EVALUATE_KINDS:?}");
         return ExitCode::from(EXIT_USAGE);
     }
-    let aggregation = match AggregationKind::from_kvs(kvs) {
+    let aggregation = match AggregationSpec::from_kvs(kvs) {
         Ok(a) => a,
         Err(msg) => {
             eprintln!("evaluate: {msg}");
@@ -632,7 +627,7 @@ fn run_evaluate(kvs: &HashMap<String, String>) -> ExitCode {
 fn run_evaluate_with<E: Embed, R: Rerank>(
     ctx: &EvalContext<E, R>,
     kind: &str,
-    aggregation: AggregationKind,
+    aggregation: AggregationSpec,
     merge_config: &HybridSearchConfig,
     normalization: &QueryNormalizationConfig,
 ) -> ExitCode {
@@ -715,7 +710,7 @@ fn run_capture_baseline(kvs: &HashMap<String, String>) -> ExitCode {
             return ExitCode::from(EXIT_USAGE);
         }
     };
-    let aggregation = match AggregationKind::from_kvs(kvs) {
+    let aggregation = match AggregationSpec::from_kvs(kvs) {
         Ok(a) => a,
         Err(msg) => {
             eprintln!("capture-baseline: {msg}");
@@ -756,7 +751,7 @@ fn run_capture_baseline(kvs: &HashMap<String, String>) -> ExitCode {
 fn run_capture_baseline_with<E: Embed, R: Rerank>(
     ctx: &EvalContext<E, R>,
     output_path: &Path,
-    aggregation: AggregationKind,
+    aggregation: AggregationSpec,
     merge_config: &HybridSearchConfig,
     normalization: &QueryNormalizationConfig,
 ) -> ExitCode {
@@ -795,7 +790,7 @@ fn run_capture_baseline_with<E: Embed, R: Rerank>(
     let snapshot = build_baseline_snapshot(
         BaselineKind::Forward,
         "eval_harness capture-baseline",
-        aggregation.name(),
+        aggregation.into(),
         &results,
         &queries,
         fixture_hash,
@@ -860,7 +855,7 @@ fn run_capture_reverse_baseline_with<E: Embed, R: Rerank>(
         &queries,
         &ctx.embedder,
         Some(&ctx.reranker),
-        AggregationKind::Identity,
+        AggregationSpec::Identity,
         &merge_config,
         &normalization,
         &config,
@@ -922,7 +917,7 @@ fn run_capture_oracle(kvs: &HashMap<String, String>) -> ExitCode {
             return ExitCode::from(EXIT_USAGE);
         }
     };
-    let aggregation = match AggregationKind::from_kvs(kvs) {
+    let aggregation = match AggregationSpec::from_kvs(kvs) {
         Ok(a) => a,
         Err(msg) => {
             eprintln!("capture-oracle: {msg}");
@@ -963,7 +958,7 @@ fn run_capture_oracle(kvs: &HashMap<String, String>) -> ExitCode {
 fn run_capture_oracle_with<E: Embed, R: Rerank>(
     ctx: &EvalContext<E, R>,
     output_path: &Path,
-    aggregation: AggregationKind,
+    aggregation: AggregationSpec,
     merge_config: &HybridSearchConfig,
     normalization: &QueryNormalizationConfig,
 ) -> ExitCode {
@@ -1002,7 +997,7 @@ fn run_capture_oracle_with<E: Embed, R: Rerank>(
     let snapshot = build_baseline_snapshot(
         BaselineKind::Oracle,
         "eval_harness capture-oracle",
-        aggregation.name(),
+        aggregation.into(),
         &results,
         &queries,
         fixture_hash,
@@ -1102,7 +1097,7 @@ fn run_replay_first_search_with<E: Embed, R: Rerank>(
     let snapshot = build_baseline_snapshot(
         BaselineKind::FirstSearchReplay,
         "eval_harness replay-first-search",
-        AGGREGATION_NONE.to_owned(),
+        AggregationKind::NotApplicable,
         &results,
         &queries,
         fixture_hash,
@@ -1129,7 +1124,7 @@ fn run_replay_first_search_with<E: Embed, R: Rerank>(
 fn build_baseline_snapshot(
     kind: BaselineKind,
     captured_with: &str,
-    aggregation: String,
+    aggregation: AggregationKind,
     results: &[QueryResult],
     queries: &[EvalQuery],
     fixture_hash: String,
@@ -1278,7 +1273,7 @@ fn run_verify_baseline_with<E: Embed, R: Rerank>(
     // its dispatch in one hop without re-splitting a merged arm.
     let pipeline_outcome: Result<Vec<QueryResult>, String> = match committed.kind {
         BaselineKind::Forward => {
-            let aggregation = match AggregationKind::from_name(&committed.aggregation) {
+            let aggregation = match AggregationSpec::try_from(committed.aggregation) {
                 Ok(a) => a,
                 Err(msg) => {
                     eprintln!("verify-baseline: {msg}");
@@ -1298,7 +1293,7 @@ fn run_verify_baseline_with<E: Embed, R: Rerank>(
             .map_err(|e| format!("{e}"))
         }
         BaselineKind::Oracle => {
-            let aggregation = match AggregationKind::from_name(&committed.aggregation) {
+            let aggregation = match AggregationSpec::try_from(committed.aggregation) {
                 Ok(a) => a,
                 Err(msg) => {
                     eprintln!("verify-baseline: {msg}");
@@ -2048,60 +2043,84 @@ mod tests {
         );
     }
 
-    // T-067-007: aggregation_kind_topk_average_roundtrips_through_name
+    // T-067-007: aggregation_kind_topk_average_roundtrips_through_storage_enum
     //
-    // A non-default `topk_k=` passed at
-    // capture time used to be silently downgraded to DEFAULT_TOPK_AVERAGE_K
-    // by `from_name` at verify time. Encode `k` in the serialised name and
-    // round-trip to keep the strategy bit-identical across capture/verify.
+    // A non-default `topk_k=` passed at capture time used to be silently
+    // downgraded to DEFAULT_TOPK_AVERAGE_K by `from_name` at verify time.
+    // `AggregationKind::TopKAverage(k)` now encodes `k` in the JSON wire form
+    // as `"topk-average:k"`, so a round-trip through serde keeps the strategy
+    // bit-identical across capture/verify.
     #[test]
-    fn aggregation_kind_topk_average_roundtrips_through_name() {
+    fn aggregation_kind_topk_average_roundtrips_through_storage_enum() {
         for k in [1, 3, 5, 100] {
-            let original = AggregationKind::TopKAverage(k);
-            let name = original.name();
+            let original_spec = AggregationSpec::TopKAverage(k);
+            let kind: AggregationKind = original_spec.into();
+            let json = serde_json::to_string(&kind).expect("serialise AggregationKind");
             assert_eq!(
-                name,
-                format!("topk-average:{k}"),
-                "TopKAverage({k}) must encode k in name"
+                json,
+                format!("\"topk-average:{k}\""),
+                "TopKAverage({k}) must serialise with k encoded in the wire form"
             );
-            let parsed =
-                AggregationKind::from_name(&name).expect("encoded topk-average must parse back");
+            let parsed_kind: AggregationKind =
+                serde_json::from_str(&json).expect("deserialise AggregationKind");
+            let parsed_spec =
+                AggregationSpec::try_from(parsed_kind).expect("storage→runtime bridge");
             assert_eq!(
-                parsed, original,
-                "round-trip lost k for TopKAverage({k}): {parsed:?}"
+                parsed_spec, original_spec,
+                "round-trip lost k for TopKAverage({k}): {parsed_spec:?}"
             );
         }
     }
 
-    // T-067-008: aggregation_kind_legacy_topk_average_falls_back_to_default
+    // T-067-008: aggregation_kind_legacy_bare_topk_average_is_rejected
     //
-    // Pre-fix baselines wrote bare "topk-average" without `k`. Verify-baseline
-    // must continue to parse those, falling back to DEFAULT_TOPK_AVERAGE_K so
-    // operators with committed snapshots aren't forced to recapture.
+    // Pre-fix baselines that wrote bare "topk-average" without `:k` are
+    // explicitly rejected at deserialise time. Silently falling back to
+    // DEFAULT_TOPK_AVERAGE_K would re-introduce the bug that the encoded
+    // form fixes — verify-baseline would dispatch at the default k instead
+    // of the captured k. No committed fixture uses the bare form, so the
+    // rejection has zero footprint.
     #[test]
-    fn aggregation_kind_legacy_topk_average_falls_back_to_default() {
-        let parsed = AggregationKind::from_name("topk-average")
-            .expect("legacy bare topk-average must still parse");
-        assert_eq!(parsed, AggregationKind::TopKAverage(DEFAULT_TOPK_AVERAGE_K));
+    fn aggregation_kind_legacy_bare_topk_average_is_rejected() {
+        let result = serde_json::from_str::<AggregationKind>("\"topk-average\"");
+        assert!(
+            result.is_err(),
+            "bare 'topk-average' must be rejected to prevent silent default-k fallback; \
+             got {result:?}"
+        );
     }
 
     // T-067-009: aggregation_kind_simple_variants_roundtrip
     //
-    // Identity / MaxChunk / Dedupe carry no `k` payload, but they share the
-    // round-trip contract — `name()` → `from_name()` must yield the original
-    // variant.
+    // Identity / MaxChunk / Dedupe / NotApplicable carry no `k` payload, but
+    // they share the round-trip contract through the storage enum.
     #[test]
     fn aggregation_kind_simple_variants_roundtrip() {
         for original in [
             AggregationKind::Identity,
             AggregationKind::MaxChunk,
             AggregationKind::Dedupe,
+            AggregationKind::NotApplicable,
         ] {
-            let name = original.name();
-            let parsed =
-                AggregationKind::from_name(&name).expect("simple variant name must round-trip");
+            let json = serde_json::to_string(&original).expect("serialise");
+            let parsed: AggregationKind = serde_json::from_str(&json).expect("deserialise");
             assert_eq!(parsed, original, "round-trip mismatch for {original:?}");
         }
+    }
+
+    // T-067-010: aggregation_kind_not_applicable_rejects_runtime_dispatch
+    //
+    // NotApplicable is the FirstSearchReplay-only marker. The
+    // `TryFrom<AggregationKind> for AggregationSpec` bridge must reject it
+    // so verify-baseline cannot accidentally dispatch a Stage 3 strategy
+    // on a replay baseline.
+    #[test]
+    fn aggregation_kind_not_applicable_rejects_runtime_dispatch() {
+        let result = AggregationSpec::try_from(AggregationKind::NotApplicable);
+        assert!(
+            result.is_err(),
+            "NotApplicable must not lower to a runtime AggregationSpec; got {result:?}"
+        );
     }
 
     // T-068-012: parse_merge_config_empty_kvs_returns_default
@@ -2279,7 +2298,7 @@ mod tests {
             model_revision: "rev".to_owned(),
             mlx_rs_version: "0.0.0".to_owned(),
             fixture_hash: "fnv1a64:0".to_owned(),
-            aggregation: "identity".to_owned(),
+            aggregation: AggregationKind::Identity,
             merge_config: HybridSearchConfig::default(),
             normalization: QueryNormalizationConfig::default(),
             global: vec![],
@@ -2313,7 +2332,7 @@ mod tests {
         build_baseline_snapshot(
             BaselineKind::FirstSearchReplay,
             "eval_harness replay-first-search",
-            AGGREGATION_NONE.to_owned(),
+            AggregationKind::NotApplicable,
             &results,
             &queries,
             "fnv1a64:0".to_owned(),
@@ -2369,9 +2388,10 @@ mod tests {
     fn replay_first_search_writes_aggregation_none() {
         let snap = build_test_replay_snapshot();
         assert_eq!(
-            snap.aggregation, "none",
+            snap.aggregation,
+            AggregationKind::NotApplicable,
             "BR-003: replay path's Stage 3 strategy is MaxChunkAggregator only \
-             (no ranking-aware aggregator) → aggregation marker is \"none\""
+             (no ranking-aware aggregator) → aggregation marker is NotApplicable"
         );
     }
 
