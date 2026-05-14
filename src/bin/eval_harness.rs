@@ -533,10 +533,27 @@ impl MetricSpec {
     }
 }
 
+/// Every subcommand label accepted by `main()` after argv parsing.
+///
+/// Source of truth for the seatbelt-sandbox classification: the compile-time
+/// `const _: () = assert!(...)` below fails the build unless every entry is
+/// assigned to either [`MLX_DEPENDENT_MODES`] or [`NON_MLX_MODES`], so a new
+/// subcommand cannot silently bypass the gate.
+const ALL_SUBCOMMANDS: &[&str] = &[
+    "evaluate",
+    "capture-baseline",
+    "capture-reverse-baseline",
+    "capture-oracle",
+    "replay-first-search",
+    "oracle-gap",
+    "verify-baseline",
+    "compare-baselines",
+    "annotate",
+];
+
 /// Modes that load MLX models and would crash under the Codex seatbelt
-/// sandbox. `exit_if_seatbelt` fires for these only — read-only modes
-/// like `oracle-gap` and `compare-baselines` parse committed JSON and
-/// have no MLX dependency, so they should run inside the sandbox.
+/// sandbox. `exit_if_seatbelt` fires for these only; the complement
+/// [`NON_MLX_MODES`] runs inside the sandbox.
 const MLX_DEPENDENT_MODES: &[&str] = &[
     "evaluate",
     "capture-baseline",
@@ -546,18 +563,26 @@ const MLX_DEPENDENT_MODES: &[&str] = &[
     "verify-baseline",
 ];
 
+/// Modes that run safely inside the seatbelt sandbox (no MLX load).
+const NON_MLX_MODES: &[&str] = &["oracle-gap", "compare-baselines", "annotate"];
+
+const _: () = assert!(MLX_DEPENDENT_MODES.len() + NON_MLX_MODES.len() == ALL_SUBCOMMANDS.len());
+
 fn main() -> ExitCode {
     rurico::handle_probe_if_needed();
 
     let args: Vec<String> = env::args().skip(1).collect();
     let Some(mode) = args.first() else {
         eprintln!(
-            "usage: eval_harness <evaluate|capture-baseline|capture-reverse-baseline|\
-             capture-oracle|replay-first-search|oracle-gap|verify-baseline|compare-baselines> \
-             [key=value...]"
+            "usage: eval_harness <{}> [key=value...]",
+            ALL_SUBCOMMANDS.join("|")
         );
         return ExitCode::from(EXIT_USAGE);
     };
+    if !ALL_SUBCOMMANDS.contains(&mode.as_str()) {
+        eprintln!("unknown mode: {mode}");
+        return ExitCode::from(EXIT_USAGE);
+    }
     if MLX_DEPENDENT_MODES.contains(&mode.as_str()) {
         exit_if_seatbelt(env!("CARGO_BIN_NAME"));
     }
@@ -576,10 +601,10 @@ fn main() -> ExitCode {
         "verify-baseline" => run_verify_baseline(&kvs),
         "compare-baselines" => run_compare_baselines(&kvs),
         "annotate" => run_annotate(&kvs),
-        other => {
-            eprintln!("unknown mode: {other}");
-            ExitCode::from(EXIT_USAGE)
-        }
+        // ALL_SUBCOMMANDS gate above rejects unknown modes; any label that
+        // reaches here is in ALL_SUBCOMMANDS but missing a dispatch arm — a
+        // build-time editing mistake that the gate cannot catch.
+        other => unreachable!("ALL_SUBCOMMANDS entry {other:?} has no dispatch arm"),
     }
 }
 
@@ -2006,6 +2031,32 @@ fn run_annotate(kvs: &HashMap<String, String>) -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // T-081-003: subcommand_sets_partition_all_subcommands
+    //
+    // Issue #81 Code fix #9: ALL_SUBCOMMANDS must be the disjoint union of
+    // MLX_DEPENDENT_MODES and NON_MLX_MODES. The compile-time `const_assert_eq!`
+    // on lengths is necessary but not sufficient — it permits a swap (one entry
+    // moved from MLX to non-MLX with another entry going the other way). This
+    // runtime check pins set equality and disjointness so a misclassified
+    // subcommand cannot silently bypass the seatbelt-sandbox gate.
+    #[test]
+    fn subcommand_sets_partition_all_subcommands() {
+        let mlx: HashSet<&str> = MLX_DEPENDENT_MODES.iter().copied().collect();
+        let non_mlx: HashSet<&str> = NON_MLX_MODES.iter().copied().collect();
+        let all: HashSet<&str> = ALL_SUBCOMMANDS.iter().copied().collect();
+        assert!(
+            mlx.is_disjoint(&non_mlx),
+            "MLX-dependent and non-MLX sets must be disjoint; \
+             overlap means a subcommand is both gated and ungated. mlx={mlx:?} non_mlx={non_mlx:?}"
+        );
+        let union: HashSet<&str> = mlx.union(&non_mlx).copied().collect();
+        assert_eq!(
+            union, all,
+            "MLX ∪ non-MLX must equal ALL_SUBCOMMANDS; \
+             missing entries can silently bypass the seatbelt classification"
+        );
+    }
 
     // T-004: tty_reject_message_contains_fr_011_substring
     // FR-011: TTY_REJECT_MESSAGE must literally contain
