@@ -145,6 +145,19 @@ const VALID_AGGREGATION_KINDS: &[&str] = &["identity", "max-chunk", "dedupe", "t
 /// chunks per document" framing without needing a flag for first capture.
 const DEFAULT_TOPK_AVERAGE_K: usize = 3;
 
+// The 1 / 2 / 3 codes below intentionally diverge from the `codes::*`
+// baseline ([`amici::cli::exit_code::codes`], sysexits 64 / 70 / 75 per
+// ADR-0066). That baseline targets downstream Group 2 *production* CLIs
+// (sae / yomu / recall); `eval_harness` is internal evaluation tooling
+// invoked through `just eval-*` recipes, not a downstream consumer.
+//
+// `EXIT_REGRESSION = 1` is documented as the public gate signal for
+// `oracle-gap` in ADR-0002 § Decision Outcome, and `tests/eval_annotation.rs`
+// adopts the same scheme for the `annotate` subcommand. Promoting these to
+// `codes::*` would force an ADR-0002 revision plus a breaking-change
+// announcement to every `justfile` recipe user that observes the exit
+// status, so the divergence is preserved deliberately.
+
 /// Exit code for a metric regression detected by `verify-baseline`. Reserved
 /// for *expected* failure modes — the gate fired because numbers moved.
 const EXIT_REGRESSION: u8 = 1;
