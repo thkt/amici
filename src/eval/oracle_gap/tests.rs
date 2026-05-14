@@ -8,7 +8,9 @@ use rurico::storage::pre_phase_5_disabled;
 use super::{
     Ac4Violation, MetricGap, OracleGapError, compute_gap, detect_ac4_violations, format_markdown,
 };
-use crate::eval::baseline::{BASELINE_SCHEMA_VERSION, BaselineKind, BaselineSnapshot};
+use crate::eval::baseline::{
+    AggregationKind, BASELINE_SCHEMA_VERSION, BaselineKind, BaselineSnapshot,
+};
 use crate::eval::metrics::MetricResult;
 
 /// Build a stub `MetricResult` for the given metric label and point estimate.
@@ -43,7 +45,7 @@ fn snapshot(
         model_revision: "rev".to_owned(),
         mlx_rs_version: "0.0.0".to_owned(),
         fixture_hash: fixture_hash.to_owned(),
-        aggregation: "identity".to_owned(),
+        aggregation: AggregationKind::Identity,
         merge_config: HybridSearchConfig::default(),
         normalization: pre_phase_5_disabled(),
         global,
@@ -121,8 +123,8 @@ fn compute_gap_rejects_fixture_hash_mismatch() {
 fn compute_gap_rejects_mismatched_aggregation() {
     let mut baseline = snapshot(BaselineKind::Forward, "fnv1a64:0", vec![], BTreeMap::new());
     let mut oracle = snapshot(BaselineKind::Oracle, "fnv1a64:0", vec![], BTreeMap::new());
-    baseline.aggregation = "identity".to_owned();
-    oracle.aggregation = "dedupe".to_owned();
+    baseline.aggregation = AggregationKind::Identity;
+    oracle.aggregation = AggregationKind::Dedupe;
     let result = compute_gap(&baseline, &oracle);
     assert!(
         matches!(
