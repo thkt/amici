@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.3",
+  "kind": "forward",
+  "captured_with": "test-historical-fixture (ADR-0007 #9)",
+  "timestamp": "epoch:0",
+  "model_id": "test/model",
+  "model_revision": "rev",
+  "mlx_rs_version": "0.0.0",
+  "fixture_hash": "fnv1a64:0",
+  "global": [],
+  "per_category": {},
+  "latency_p50_ms": 0.0,
+  "latency_p95_ms": 0.0
+}
