@@ -9,7 +9,6 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-use bytemuck::cast_slice;
 use rurico::embed::{EMBEDDING_DIMS, Embed, EmbedError};
 use rurico::reranker::{Rerank, RerankerError};
 use rurico::retrieval::{
@@ -111,6 +110,47 @@ pub enum PipelineError {
         /// `chunk_ids.len()` reported by the embedder.
         chunk_ids: usize,
     },
+    /// A per-document chunk vector did not have [`EMBEDDING_DIMS`] elements.
+    ///
+    /// Surfaces a [`ChunkedEmbedding::chunks`](rurico::embed::ChunkedEmbedding)
+    /// length contract violation observed by [`index_corpus`]. See
+    /// [`embedding_bytes`] for the layout-pinning rationale.
+    #[error(
+        "pipeline chunk dimension mismatch for doc {doc_id:?}: \
+         expected {expected} elements, got {actual}"
+    )]
+    ChunkDimensionMismatch {
+        /// Identifier of the corpus document whose chunk vector was wrong.
+        doc_id: String,
+        /// Expected dimension ([`EMBEDDING_DIMS`]).
+        expected: usize,
+        /// Dimension reported by the embedder.
+        actual: usize,
+    },
+    /// A query embedding from [`Embed::embed_query`] did not have
+    /// [`EMBEDDING_DIMS`] elements.
+    ///
+    /// Companion to [`PipelineError::ChunkDimensionMismatch`] for the
+    /// per-query retrieval path.
+    #[error(
+        "pipeline query embedding dimension mismatch: expected {expected} elements, got {actual}"
+    )]
+    QueryDimensionMismatch {
+        /// Expected dimension ([`EMBEDDING_DIMS`]).
+        expected: usize,
+        /// Dimension reported by the embedder.
+        actual: usize,
+    },
+}
+
+/// Cast an [`EMBEDDING_DIMS`]-element `f32` vector to its raw byte
+/// representation for sqlite-vec `FLOAT[EMBEDDING_DIMS]` storage.
+///
+/// The fixed-size array argument pins element type and dimension at
+/// compile time; a layout change surfaces as a type error rather than
+/// silently rewriting stored bytes.
+fn embedding_bytes(v: &[f32; EMBEDDING_DIMS]) -> &[u8] {
+    bytemuck::cast_slice(v)
 }
 
 /// Run the reference pipeline on `corpus` for every query in `queries`.
@@ -360,7 +400,15 @@ fn index_corpus<E: Embed>(
                 .iter()
                 .zip(&chunked_embedding.chunk_ids)
             {
-                let chunk_bytes: &[u8] = cast_slice(chunk_vec);
+                let chunk_array: &[f32; EMBEDDING_DIMS] =
+                    chunk_vec.as_slice().try_into().map_err(|_| {
+                        PipelineError::ChunkDimensionMismatch {
+                            doc_id: doc.id.clone(),
+                            expected: EMBEDDING_DIMS,
+                            actual: chunk_vec.len(),
+                        }
+                    })?;
+                let chunk_bytes: &[u8] = embedding_bytes(chunk_array);
                 insert_vec.execute(params![chunk_bytes, &doc.id, chunk_id])?;
             }
         }
@@ -517,7 +565,15 @@ fn retrieve_vec<E: Embed>(
     limit: usize,
 ) -> Result<Vec<Candidate>, PipelineError> {
     let embedding = embedder.embed_query(query)?;
-    let bytes: &[u8] = cast_slice(&embedding);
+    let embedding_array: &[f32; EMBEDDING_DIMS] =
+        embedding
+            .as_slice()
+            .try_into()
+            .map_err(|_| PipelineError::QueryDimensionMismatch {
+                expected: EMBEDDING_DIMS,
+                actual: embedding.len(),
+            })?;
+    let bytes: &[u8] = embedding_bytes(embedding_array);
     let k_i64 = i64::try_from(limit).unwrap_or(i64::MAX);
     let mut stmt = conn.prepare_cached(
         "SELECT doc_id, chunk_id, distance FROM vec_docs WHERE embedding MATCH ? AND k = ?",
@@ -616,7 +672,7 @@ fn apply_reranker<R: Rerank>(
 mod tests {
     use std::collections::{HashMap, HashSet};
 
-    use rurico::embed::{MockChunkedEmbedder, MockEmbedder};
+    use rurico::embed::{EMBEDDING_DIMS, MockChunkedEmbedder, MockEmbedder};
     use rurico::reranker::MockReranker;
     use rurico::retrieval::{
         HybridSearchConfig, IdentityAggregator, MaxChunkAggregator, MergedHit, WeightedRrf,
@@ -624,7 +680,7 @@ mod tests {
     use rurico::storage::QueryNormalizationConfig;
 
     use super::{
-        PipelineConfig, evaluate, evaluate_first_search_replay, run_stage1_plus_2,
+        PipelineConfig, PipelineError, evaluate, evaluate_first_search_replay, run_stage1_plus_2,
         setup_pipeline_connection,
     };
     use crate::eval::fixture::{EvalDocument, EvalQuery};
@@ -1279,5 +1335,35 @@ mod tests {
              {chunk_id_some_count} hits with chunk_id=Some, ranked_hits={:?}",
             results[0].ranked_hits
         );
+    }
+
+    // T-081-001: index_corpus_rejects_chunk_with_wrong_dimension
+    //
+    // The `&[f32; EMBEDDING_DIMS]` cast in `index_corpus` is the layout
+    // contract enforcement point. A chunk vector with length ≠
+    // `EMBEDDING_DIMS` must surface as `ChunkDimensionMismatch` instead of
+    // a `bytemuck` panic or silently rewritten bytes.
+    #[test]
+    fn index_corpus_rejects_chunk_with_wrong_dimension() {
+        let corpus = vec![make_document("d1", "alpha document about retrieval")];
+        let wrong_dims = EMBEDDING_DIMS + 1;
+        let embedder = MockEmbedder::with_dims(wrong_dims);
+        let normalization = QueryNormalizationConfig::default();
+
+        let err = setup_pipeline_connection(&corpus, &embedder, &normalization)
+            .expect_err("dim mismatch must surface as ChunkDimensionMismatch");
+
+        match err {
+            PipelineError::ChunkDimensionMismatch {
+                doc_id,
+                expected,
+                actual,
+            } => {
+                assert_eq!(doc_id, "d1");
+                assert_eq!(expected, EMBEDDING_DIMS);
+                assert_eq!(actual, wrong_dims);
+            }
+            other => panic!("expected ChunkDimensionMismatch, got {other:?}"),
+        }
     }
 }
