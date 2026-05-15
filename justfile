@@ -17,7 +17,8 @@ default:
 check: test lint fmt-check
 
 test:
-    cargo test --all-features
+    cargo nextest run --all-features
+    cargo test --doc --all-features
 
 lint:
     cargo clippy --all-targets --all-features -- -D warnings
