@@ -6,8 +6,8 @@
 //! - [`codes`] module — `u8` constants from two sources, kept side-by-side
 //!   so call sites do not need to import from two places:
 //!   1. [sysexits.h](https://man.openbsd.org/sysexits.3) (64–78). Standard
-//!      Unix exit categories — `USAGE`, `SOFTWARE`, `CANT_CREAT`, `IO_ERR`,
-//!      `TEMP_FAIL`.
+//!      Unix exit categories — `USAGE`, `DATA_ERROR`, `SOFTWARE`,
+//!      `CANT_CREAT`, `IO_ERR`, `TEMP_FAIL`.
 //!   2. Project extension range (80–119). Assigned per ADR-0066 when no
 //!      sysexits variant fits. Currently: `UNKNOWN` (104).
 //!
@@ -82,6 +82,9 @@ pub mod codes {
     pub const SUCCESS: u8 = 0;
     /// `EX_USAGE`. Bad command-line usage (missing arg, unknown flag, etc.).
     pub const USAGE: u8 = 64;
+    /// `EX_DATAERR`. Input data was malformed — query syntax invalid,
+    /// encoding error, etc. (per ADR-0066 Group 2 baseline).
+    pub const DATA_ERROR: u8 = 65;
     /// `EX_SOFTWARE`. Internal software error — invariant violated.
     pub const SOFTWARE: u8 = 70;
     /// `EX_CANTCREAT`. Cannot create a (user-visible) output file or path.
@@ -123,6 +126,7 @@ mod tests {
     fn codes_match_sysexits_constants() {
         assert_eq!(codes::SUCCESS, 0);
         assert_eq!(codes::USAGE, 64);
+        assert_eq!(codes::DATA_ERROR, 65);
         assert_eq!(codes::SOFTWARE, 70);
         assert_eq!(codes::CANT_CREAT, 73);
         assert_eq!(codes::IO_ERR, 74);

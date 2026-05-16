@@ -245,10 +245,10 @@ failures from a single value regardless of which Group 2 CLI emitted it.
 
 The `codes` module exposes two source ranges side-by-side:
 
-| Range  | Source                             | Codes                                                    |
-| ------ | ---------------------------------- | -------------------------------------------------------- |
-| 64–78  | sysexits.h                         | `USAGE`, `SOFTWARE`, `CANT_CREAT`, `IO_ERR`, `TEMP_FAIL` |
-| 80–119 | Project extension range (ADR-0066) | `UNKNOWN` (104)                                          |
+| Range  | Source                             | Codes                                                                  |
+| ------ | ---------------------------------- | ---------------------------------------------------------------------- |
+| 64–78  | sysexits.h                         | `USAGE`, `DATA_ERROR`, `SOFTWARE`, `CANT_CREAT`, `IO_ERR`, `TEMP_FAIL` |
+| 80–119 | Project extension range (ADR-0066) | `UNKNOWN` (104)                                                        |
 
 `codes::INTERNAL` is provided as an alias for `SOFTWARE` so call sites can use
 the name that ADR-0066's classification table uses — the numeric value is
