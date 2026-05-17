@@ -42,16 +42,24 @@ impl fmt::Display for DegradedReason {
     }
 }
 
-/// Returns a short user-facing note for a degraded model (embedder or reranker),
+/// Returns a short user-facing note for a degraded embedder,
 /// or `None` if no message should be shown (e.g. the caller explicitly disabled the model).
-pub fn degraded_reason_user_note(reason: DegradedReason) -> Option<&'static str> {
+///
+/// `download_cmd` is interpolated into the [`DegradedReason::NotInstalled`] note so the
+/// caller can surface the binary-specific recovery action (e.g. `"yomu model download"`).
+/// Other variants ignore `download_cmd` because their cause is not addressable by
+/// re-downloading the model.
+///
+/// The wording is embedder-specific. Reranker callers should not reuse this fn;
+/// no reranker-degraded note helper exists yet because no consumer needs one.
+pub fn degraded_reason_user_note(reason: DegradedReason, download_cmd: &str) -> Option<String> {
     match reason {
         DegradedReason::Disabled => None,
-        DegradedReason::NotInstalled => {
-            Some("embedding model not installed; results from text search only")
-        }
+        DegradedReason::NotInstalled => Some(format!(
+            "embedding model not installed; run `{download_cmd}` to enable semantic search"
+        )),
         DegradedReason::BackendUnavailable | DegradedReason::ProbeFailed => {
-            Some("embedding model unavailable; results from text search only")
+            Some("embedding model unavailable; results from text search only".into())
         }
     }
 }
@@ -568,6 +576,62 @@ mod tests {
         assert!(
             captured.contains("seed inference"),
             "missing context: {captured}"
+        );
+    }
+
+    // T-030: degraded_reason_user_note_returns_none_for_disabled
+    #[test]
+    fn degraded_reason_user_note_returns_none_for_disabled() {
+        assert_eq!(
+            degraded_reason_user_note(DegradedReason::Disabled, "any cmd"),
+            None,
+            "Disabled is caller opt-out; suppress the note"
+        );
+    }
+
+    // T-031: degraded_reason_user_note_injects_download_cmd_for_not_installed
+    #[test]
+    fn degraded_reason_user_note_injects_download_cmd_for_not_installed() {
+        let note = degraded_reason_user_note(DegradedReason::NotInstalled, "yomu model download")
+            .expect("NotInstalled must produce a note");
+        assert!(
+            note.contains("`yomu model download`"),
+            "download_cmd must appear backtick-quoted, got: {note}"
+        );
+        assert!(
+            note.contains("not installed"),
+            "note must explain the cause, got: {note}"
+        );
+    }
+
+    // T-032: degraded_reason_user_note_ignores_download_cmd_for_backend_unavailable
+    #[test]
+    fn degraded_reason_user_note_ignores_download_cmd_for_backend_unavailable() {
+        let note =
+            degraded_reason_user_note(DegradedReason::BackendUnavailable, "recall model download")
+                .expect("BackendUnavailable must produce a note");
+        assert!(
+            !note.contains("recall model download"),
+            "download_cmd must not leak into BackendUnavailable note, got: {note}"
+        );
+        assert!(
+            note.contains("text search only"),
+            "note must explain the fallback, got: {note}"
+        );
+    }
+
+    // T-033: degraded_reason_user_note_ignores_download_cmd_for_probe_failed
+    #[test]
+    fn degraded_reason_user_note_ignores_download_cmd_for_probe_failed() {
+        let note = degraded_reason_user_note(DegradedReason::ProbeFailed, "sae model download")
+            .expect("ProbeFailed must produce a note");
+        assert!(
+            !note.contains("sae model download"),
+            "download_cmd must not leak into ProbeFailed note, got: {note}"
+        );
+        assert!(
+            note.contains("text search only"),
+            "note must explain the fallback, got: {note}"
         );
     }
 }
