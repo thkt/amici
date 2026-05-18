@@ -72,7 +72,7 @@ amici/src/
 1. amiciに共通コードを実装し `rurico` を依存に追加する
 2. sae/yomuでローカル定義を削除しamiciからimportするように書き換える
 3. recallの `Spinner`（`Mutex<State>` 型）をamici版（`AtomicBool+Mutex<String>` 型）に差し替える
-4. recallの `try_load_embedder` を `ModelLoad` パターンに書き直す
+4. recallの `try_load_embedder` を `ModelLoad` パターン (amici の `try_load_embedder_with` / `try_load_embedder_default_logging`) に書き直す
 
 ## Rollback Plan
 

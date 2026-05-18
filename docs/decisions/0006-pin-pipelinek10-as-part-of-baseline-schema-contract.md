@@ -8,7 +8,7 @@
 
 ## Context and Problem Statement
 
-`src/bin/eval_harness.rs:L99` の `const PIPELINE_K: usize = 10;` は ADR-0002 の評価方法論で前提とする「上位 k 件」の `k` 値を決定する。bootstrap seed (`SHUFFLE_SEED=42`, `BOOTSTRAP_SEED=42`) と並んで、baseline.json 出力 (`recall@10`, `mrr@10`, `ndcg@10`) の意味を決める load-bearing constant である。
+`src/bin/eval_harness.rs` の `const PIPELINE_K: usize = 10;` は ADR-0002 の評価方法論で前提とする「上位 k 件」の `k` 値を決定する。bootstrap seed (`SHUFFLE_SEED=42`, `BOOTSTRAP_SEED=42`) と並んで、baseline.json 出力 (`recall@10`, `mrr@10`, `ndcg@10`) の意味を決める load-bearing constant である。
 
 ADR-0002 は方法論 (fixture 規約、Bootstrap CI、tolerance envelope) を定めるが PIPELINE_K の具体値は固定しない。すなわち value を変えても ADR-0002 の方法論には違反しないが、`tests/fixtures/eval/baseline.json` 等に記録された値の意味は変わる (recall@10 と recall@20 は semantic に別物)。失敗モードは silent — テストは通り、CI も通り、レビューでも見落とされうる。
 
@@ -38,7 +38,7 @@ Chosen option: "PIPELINE_K=10 を baseline schema contract の一部として本
    - (b) `tests/fixtures/eval/*.json` 全 baseline の recapture 必須 (`just eval-baseline` / `just eval-reverse` / `just eval-oracle`)
    - (c) ADR-0002 § Reassessment Triggers に "PIPELINE_K change" 行追加
    - (d) 本 ADR を supersede する新 ADR を起票
-3. **コード側マーカー** (実装 follow-up): `src/bin/eval_harness.rs:L99` の `PIPELINE_K` 定義に本 ADR を参照するコメント追加
+3. **コード側マーカー** (実装 follow-up): `src/bin/eval_harness.rs` の `PIPELINE_K` 定義に本 ADR を参照するコメント追加
 4. **検証マーカー** (実装 follow-up): `verify-baseline` で baseline.json の `recall@k` 等のキー名から `k` を逆引きし、`PIPELINE_K` と一致しない baseline は reject
 
 ### Consequences
@@ -50,7 +50,7 @@ Chosen option: "PIPELINE_K=10 を baseline schema contract の一部として本
 
 ### Confirmation
 
-- `git grep "PIPELINE_K"` で定義点が `src/bin/eval_harness.rs:L99` の 1 か所のみであることを継続確認
+- `git grep "PIPELINE_K"` で定義点が `src/bin/eval_harness.rs` の 1 か所のみであることを継続確認
 - `BASELINE_SCHEMA_VERSION` を bump する PR が本 ADR を参照していることをレビューチェックリストに組み込む
 - 上記 4 の `verify-baseline` 検証マーカーが land 後は CI が自動で gate
 
@@ -103,6 +103,6 @@ Chosen option: "PIPELINE_K=10 を baseline schema contract の一部として本
 - ADR-0002: Search Quality Evaluation Methodology (§ Decision Outcome / § Reassessment Triggers)
 - ADR-0003: Add pgr-style First-Search Offline Retrieval Benchmark (§ Reassessment Triggers, `Hit@k` 追加 precedent)
 - audit report `docs/audit/2026-05-14-undocumented-decisions.md` § Three Strongest #1 / § ADR Promotion Candidates #6
-- `src/bin/eval_harness.rs:L99` (`PIPELINE_K` 定義箇所)
+- `src/bin/eval_harness.rs` (`PIPELINE_K` 定義箇所)
 - `src/eval/metrics.rs` (`recall_at_k` / `mrr_at_k` / `ndcg_at_k` / `hit_at_k` — k を消費する metric 関数群)
 - `tests/fixtures/eval/baseline.json` (固定対象 baseline)

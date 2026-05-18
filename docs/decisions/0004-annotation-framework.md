@@ -18,7 +18,7 @@ ADR-0001 は amici の charter を「shared model-loading + CLI utilities」、A
 - charter clarity: authoring tool が ADR で説明可能な状態を維持し、新規 contributor が charter scope を `docs/decisions/` から判断できる
 - provenance discipline: queries.jsonl 拡張に session-level provenance (annotator id / session id / fixture hash) を attach する型基盤を public API として提供
 - envelope discipline: `ANNOTATION_SCHEMA_VERSION` 定数を canonical reference として固定し、schema version mismatch を runtime で typed error として検出可能にする (`oracle_gap.rs::OracleGapError::SchemaVersionMismatch` precedent)
-- naming collision avoidance: 既存 `EvalQuery.annotation: String` field (`src/eval/fixture.rs:34-36`、`REQUIRED_QUERY_FIELDS:132`) と命名衝突せず両者を同一 test scope 内で参照可能にする
+- naming collision avoidance: 既存 `EvalQuery.annotation: String` field (`src/eval/fixture.rs` の `EvalQuery::annotation`、`REQUIRED_QUERY_FIELDS:132`) と命名衝突せず両者を同一 test scope 内で参照可能にする
 - 168 行 queries.jsonl の breaking change を避ける: 既存 fixture を rename / migration 不要のまま foundation を land する
 
 ## Considered Options
@@ -91,7 +91,7 @@ Option 1 を採用する。
 - amici Issue #62 (first-search replay subcommand — PR-C blocking)
 - `src/eval/baseline.rs` (`BASELINE_SCHEMA_VERSION` envelope precedent)
 - `src/eval/oracle_gap.rs` (`OracleGapError::SchemaVersionMismatch` typed error precedent)
-- `src/eval/fixture.rs:34-36` (existing `EvalQuery.annotation` field that motivates module-path namespacing)
+- `src/eval/fixture.rs` `EvalQuery::annotation` (existing field that motivates module-path namespacing)
 
 ## Downstream consumers (this ADR を前提として動く後続)
 
