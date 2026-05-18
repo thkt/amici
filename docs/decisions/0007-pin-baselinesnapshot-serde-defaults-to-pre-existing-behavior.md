@@ -8,9 +8,9 @@
 
 ## Context and Problem Statement
 
-`BaselineSnapshot` (`src/eval/baseline.rs:L86-L150`) は新しいフィールド追加を `#[serde(default = ...)]` で吸収する設計で、historical な baseline.json を field 追加後も deserialize で round-trip できるようにしている。
+`BaselineSnapshot` (`src/eval/baseline.rs::BaselineSnapshot`) は新しいフィールド追加を `#[serde(default = ...)]` で吸収する設計で、historical な baseline.json を field 追加後も deserialize で round-trip できるようにしている。
 
-このとき重要なのは **default が指す値の意味**である。`normalization` フィールド (L132-141) のコメントが明示しているように:
+このとき重要なのは **default が指す値の意味**である。`normalization` フィールドのコメントが明示しているように:
 
 > Pre-normalization baselines lack this field; the serde-default points at `pre_phase_5_disabled` (all OFF), **not** at runtime `QueryNormalizationConfig::default` (all ON), so historical files replay under the behaviour they were captured with.
 
@@ -87,7 +87,7 @@ Chosen option: "Module-doc + ADR で規律を明文化、新規フィールド�
 
 ### Trade-offs
 
-`BaselineKind` (closed enum, `#[serde(rename_all = "snake_case")]`) と `aggregation` フィールドの typed/untyped 非対称は **PR #86 で resolved** — `aggregation` は `AggregationKind` typed enum に昇格し、wire form (`identity` / `max-chunk` / `dedupe` / `topk-average:k` / `none`) は manual `Serialize` / `Deserialize` impl で controlled (`src/eval/baseline.rs:117-171`)。audit report #56 で別途 type-system fix 候補と記録していた gap は閉じた。本 ADR は default **値の選び方** に関する規律のみを定める。
+`BaselineKind` (closed enum, `#[serde(rename_all = "snake_case")]`) と `aggregation` フィールドの typed/untyped 非対称は **PR #86 で resolved** — `aggregation` は `AggregationKind` typed enum に昇格し、wire form (`identity` / `max-chunk` / `dedupe` / `topk-average:k` / `none`) は manual `Serialize` / `Deserialize` impl で controlled (`src/eval/baseline.rs::AggregationKind` + 同 file の `impl Serialize` / `impl<'de> Deserialize<'de>`)。audit report #56 で別途 type-system fix 候補と記録していた gap は閉じた。本 ADR は default **値の選び方** に関する規律のみを定める。
 
 ### Implementation Guidelines
 
@@ -119,7 +119,7 @@ Chosen option: "Module-doc + ADR で規律を明文化、新規フィールド�
 - ADR-0003: Add pgr-style First-Search Offline Retrieval Benchmark (§ Decision Outcome 3 — `BASELINE_SCHEMA_VERSION` を 1.2 → 1.3 bump した precedent)
 - ADR-0004: Annotation Framework Foundation (§ Considered Options 2 — `BaselineSnapshot` envelope precedent を Provenance 型で踏襲)
 - audit report `docs/audit/2026-05-14-undocumented-decisions.md` § Three Strongest #2 / § ADR Promotion Candidates #55
-- `src/eval/baseline.rs:L52` (`BASELINE_SCHEMA_VERSION="1.3"` 定義)
-- `src/eval/baseline.rs:L124-141` (3 つの `#[serde(default = ...)]` 用例)
+- `src/eval/baseline.rs::BASELINE_SCHEMA_VERSION` (現値 "1.3" 定義)
+- `src/eval/baseline.rs::BaselineSnapshot` (3 つの `#[serde(default = ...)]` 用例: `aggregation` / `merge_config` / `normalization` field)
 - `src/eval/baseline.rs::pre_phase_5_disabled` (historical-behavior fn の precedent)
 - `src/eval/baseline.rs::default_aggregation_kind` (historical-behavior fn の precedent)
