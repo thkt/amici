@@ -52,6 +52,23 @@ fn format_hint_arrow<S: AsRef<str>>(items: &[S]) -> String {
     format!("→ {joined}")
 }
 
+/// Prints a recovery hint to stderr.
+///
+/// Use when an operation degraded to a fallback and the user has a concrete
+/// next step (e.g. "run `<binary> model download` to enable semantic search").
+/// Output is prefixed with `Hint: ` so consumers can `grep` for hints separately
+/// from `warning:` / `error:` lines.
+///
+/// # Examples
+///
+/// ```no_run
+/// amici::cli::hint("run `yomu model download` to enable semantic search");
+/// // stderr: Hint: run `yomu model download` to enable semantic search
+/// ```
+pub fn hint(msg: &str) {
+    eprintln!("Hint: {msg}");
+}
+
 /// Prints `msg` to stderr as an informational notice.
 ///
 /// Replaces `println!` usages where the text is CLI guidance rather than the
@@ -79,6 +96,23 @@ pub fn info(msg: &str) {
 /// ```
 pub fn deprecation_warn(old: &str, new: &str) {
     eprintln!("warning: {old} is deprecated, use {new} instead");
+}
+
+/// Prints a generic warning to stderr.
+///
+/// Use when a CLI surface encounters a recoverable anomaly that the user
+/// should be aware of (e.g. a model failed to load and search continues
+/// with text-only fallback). Output is prefixed with `warning: ` to match
+/// [`exit_error`] (`error: `) and [`deprecation_warn`] (`warning: ...`).
+///
+/// # Examples
+///
+/// ```no_run
+/// amici::cli::warning("embedding model not available (probe failed)");
+/// // stderr: warning: embedding model not available (probe failed)
+/// ```
+pub fn warning(msg: &str) {
+    eprintln!("warning: {msg}");
 }
 
 /// Prints a two-space-indented progress line to stderr.
@@ -151,10 +185,22 @@ mod tests {
         info("some guidance");
     }
 
+    // T-124: hint_does_not_panic
+    #[test]
+    fn hint_does_not_panic() {
+        hint("run `yomu model download` to enable semantic search");
+    }
+
     // T-050: deprecation_warn_does_not_panic
     #[test]
     fn deprecation_warn_does_not_panic() {
         deprecation_warn("--old", "--new");
+    }
+
+    // T-125: warning_does_not_panic
+    #[test]
+    fn warning_does_not_panic() {
+        warning("model not available");
     }
 
     // T-051: format_progress_step_joins_with_em_dash_and_indents

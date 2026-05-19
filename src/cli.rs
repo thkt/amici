@@ -6,6 +6,6 @@ mod spinner;
 
 pub use config::env_lookup;
 pub use exit_code::CliError;
-pub use message::{deprecation_warn, exit_error, hint_arrow, info, progress_step};
+pub use message::{deprecation_warn, exit_error, hint, hint_arrow, info, progress_step, warning};
 pub use shorthand::try_expand_shorthand;
 pub use spinner::{Spinner, done, embed_with_spinners, with_spinner};
