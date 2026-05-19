@@ -11,7 +11,7 @@ use rurico::model_init::ModelInitError;
 use rurico::model_probe::ProbeStatus;
 
 use self::embedder::try_load_embedder_with_fns;
-use crate::cli::with_spinner;
+use crate::cli::{hint, warning, with_spinner};
 
 /// Reason a model could not be loaded.
 ///
@@ -180,13 +180,13 @@ impl<T> ModelLoad<T> {
 
     /// Prints a user-facing hint or warning to stderr when the model is not ready.
     ///
-    /// - [`Absent`](ModelLoad::Absent): prints `"Hint: {absent_hint}"`
-    /// - [`Failed`](ModelLoad::Failed): prints `"Warning: {model_label} not available ({error})"`
+    /// - [`Absent`](ModelLoad::Absent): prints `"Hint: {absent_hint}"` via [`crate::cli::hint`]
+    /// - [`Failed`](ModelLoad::Failed): prints `"warning: {model_label} not available ({error})"` via [`crate::cli::warning`]
     /// - [`Ready`](ModelLoad::Ready): no-op
     pub fn emit_load_hint(&self, absent_hint: &str, model_label: &str) {
         match self {
-            Self::Absent => eprintln!("Hint: {absent_hint}"),
-            Self::Failed(e) => eprintln!("Warning: {model_label} not available ({e})"),
+            Self::Absent => hint(absent_hint),
+            Self::Failed(e) => warning(&format!("{model_label} not available ({e})")),
             Self::Ready(_) => {}
         }
     }
