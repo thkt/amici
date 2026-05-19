@@ -6,6 +6,7 @@ rust-version = "1.95"
 description = "Shared model-loading, storage helpers, and CLI utilities for the sae/yomu/recall toolchain"
 license = "MIT"
 repository = "https://github.com/thkt/amici"
+publish = false
 
 [features]
 test-support = []
