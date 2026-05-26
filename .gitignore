@@ -4,3 +4,7 @@
 .playwright-cli/
 target/
 workspace/
+
+# Coverage artifacts (cargo llvm-cov)
+*.profraw
+/lcov.info
