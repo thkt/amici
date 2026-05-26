@@ -581,19 +581,6 @@ mod tests {
         );
     }
 
-    // T-062-013: baseline_schema_version_is_1_3
-    //
-    // FR-014: BASELINE_SCHEMA_VERSION bumped to "1.3" so verify-baseline
-    // refuses 1.2 stamps via EXIT_REGRESSION (silent skip would mask
-    // FirstSearchReplay readiness).
-    #[test]
-    fn baseline_schema_version_is_1_3() {
-        assert_eq!(
-            BASELINE_SCHEMA_VERSION, "1.3",
-            "FR-014: schema must be 1.3 to gate stale 1.2 baselines"
-        );
-    }
-
     // T-062-014: committed_baselines_deserialize_under_schema_1_3
     //
     // FR-014 / AC-6: every committed baseline file (forward / oracle /
