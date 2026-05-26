@@ -2357,10 +2357,25 @@ mod tests {
         let _exit = run_replay_first_search_with(&ctx, &output_path, &merge_config, &normalization);
 
         let snapshot = read_snapshot(&output_path).unwrap_or_else(|e| panic!("T-068-001: {e}"));
+        // Replay envelope contract, asserted against the real
+        // `run_replay_first_search_with` output rather than a builder fed
+        // hardcoded args: kind (proves the pipeline ran), captured_with
+        // (FR-019 provenance), and the BR-003 aggregation marker. Checking
+        // the live snapshot subsumes the former pass-through unit tests.
         assert_eq!(
             snapshot.kind,
             BaselineKind::FirstSearchReplay,
             "T-068-001: snapshot kind must be FirstSearchReplay (proves pipeline ran)"
+        );
+        assert_eq!(
+            snapshot.captured_with, "eval_harness replay-first-search",
+            "T-068-001: FR-019 — replay snapshot must record the subcommand in captured_with"
+        );
+        assert_eq!(
+            snapshot.aggregation,
+            AggregationKind::NotApplicable,
+            "T-068-001: BR-003 — replay runs MaxChunkAggregator only, so the \
+             aggregation marker must be NotApplicable"
         );
         assert_eq!(
             init_calls.load(Ordering::SeqCst),
@@ -2439,42 +2454,6 @@ mod tests {
                 .expect("first_search_replay kind must parse"),
             BaselineKind::FirstSearchReplay,
             "FR-016/FR-017: subcommand kind label must map to FirstSearchReplay"
-        );
-    }
-
-    // T-062-017: replay_first_search_writes_baseline_with_kind_first_search_replay
-    //
-    // FR-019: snapshot envelope kind == FirstSearchReplay so consumers can
-    // tell the file apart from forward / oracle baselines.
-    #[test]
-    fn replay_first_search_writes_baseline_with_kind_first_search_replay() {
-        let snap = build_test_replay_snapshot();
-        assert_eq!(snap.kind, BaselineKind::FirstSearchReplay);
-    }
-
-    // T-062-018: replay_first_search_writes_captured_with_replay_first_search
-    //
-    // FR-019: provenance string lets log readers tell which subcommand
-    // produced the file. Also doubles as the regenerate hint that
-    // `verify-baseline` emits on schema_version mismatch.
-    #[test]
-    fn replay_first_search_writes_captured_with_replay_first_search() {
-        let snap = build_test_replay_snapshot();
-        assert_eq!(snap.captured_with, "eval_harness replay-first-search");
-    }
-
-    // T-062-019: replay_first_search_writes_aggregation_none
-    //
-    // BR-003: replay path runs Stage 3 = MaxChunkAggregator only — no
-    // ranking-aware aggregator is invoked, so the field marker is "none".
-    #[test]
-    fn replay_first_search_writes_aggregation_none() {
-        let snap = build_test_replay_snapshot();
-        assert_eq!(
-            snap.aggregation,
-            AggregationKind::NotApplicable,
-            "BR-003: replay path's Stage 3 strategy is MaxChunkAggregator only \
-             (no ranking-aware aggregator) → aggregation marker is NotApplicable"
         );
     }
 

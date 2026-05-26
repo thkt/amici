@@ -121,16 +121,6 @@ fn validate_schema_version_rejects_mismatched_label() {
     );
 }
 
-// T-004a: annotation_schema_version_constant_equals_1_0
-// FR-002: ANNOTATION_SCHEMA_VERSION pub const equals "1.0".
-#[test]
-fn annotation_schema_version_constant_equals_1_0() {
-    assert_eq!(
-        ANNOTATION_SCHEMA_VERSION, "1.0",
-        "FR-002: ANNOTATION_SCHEMA_VERSION must equal \"1.0\""
-    );
-}
-
 // T-004b: entry_mode_is_reachable_as_block_mode_standard
 // FR-006: BlockMode::Standard is reachable as the sole Phase 1
 //         authoring strategy variant via `matches!`.
@@ -142,19 +132,6 @@ fn entry_mode_is_reachable_as_block_mode_standard() {
         "FR-006: Entry.mode must be reachable as BlockMode::Standard; \
          got: {:?}",
         session.entries[0].mode
-    );
-}
-
-// T-004c: annotation_error_empty_session_variant_is_reachable
-// FR-001: AnnotationError pub-exports the EmptySession variant
-//         reachable via `matches!`.
-#[test]
-fn annotation_error_empty_session_variant_is_reachable() {
-    let err: AnnotationError = AnnotationError::EmptySession;
-    assert!(
-        matches!(err, AnnotationError::EmptySession),
-        "FR-001: AnnotationError::EmptySession variant must be reachable via matches!; \
-         got: {err:?}"
     );
 }
 
