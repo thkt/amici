@@ -648,4 +648,38 @@ mod tests {
             "Some(detail) must embed the detail in the wording"
         );
     }
+
+    // T-035: new_fn_corrupt_returns_probe_failed_none
+    #[test]
+    fn new_fn_corrupt_returns_probe_failed_none() {
+        let delete_attempted = Cell::new(false);
+        let delete_error_seen = Cell::new(false);
+        let result = try_download_and_verify_with_fns::<_, MockEmbedder, String>(
+            || Ok::<_, String>(()),
+            |_| delete_error_seen.set(true),
+            |_| Ok(ProbeStatus::Available),
+            |_| {
+                Err(ModelInitError::ModelCorrupt {
+                    reason: "weights corrupt".into(),
+                })
+            },
+            |_| {
+                delete_attempted.set(true);
+                Err(io::Error::other("disk full"))
+            },
+            || {},
+        );
+        assert!(
+            matches!(result, Err(ModelDownloadError::ProbeFailed(None))),
+            "ModelCorrupt must map to ProbeFailed(None) (detail not captured), got {result:?}"
+        );
+        assert!(
+            delete_attempted.get(),
+            "ModelCorrupt must attempt artifact deletion"
+        );
+        assert!(
+            delete_error_seen.get(),
+            "delete failure must reach on_delete_error"
+        );
+    }
 }
