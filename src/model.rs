@@ -210,9 +210,10 @@ pub enum ModelDownloadError {
     /// The hardware/OS backend (e.g. MLX) is not available on this machine.
     BackendUnavailable,
     /// The downloaded model files could not be loaded.
-    /// The inner `String` carries the probe error string; it is empty when
-    /// model-file corruption prevented error capture (see `ModelCorrupt` handling).
-    ProbeFailed(String),
+    /// The inner `Option<String>` carries the probe error detail; it is `None`
+    /// when model-file corruption prevented error capture (see
+    /// [`ModelInitError::ModelCorrupt`] handling).
+    ProbeFailed(Option<String>),
 }
 
 impl fmt::Display for ModelDownloadError {
@@ -228,10 +229,10 @@ impl fmt::Display for ModelDownloadError {
                 f,
                 "MLX backend unavailable; requires Apple Silicon with macOS 14 or later"
             ),
-            Self::ProbeFailed(detail) if detail.is_empty() => {
+            Self::ProbeFailed(None) => {
                 write!(f, "model probe failed; try again or re-download the model")
             }
-            Self::ProbeFailed(detail) => write!(
+            Self::ProbeFailed(Some(detail)) => write!(
                 f,
                 "model probe failed: {detail}; try again or re-download the model"
             ),
@@ -317,9 +318,7 @@ where
     .map(|_| ())
     .map_err(|reason| match reason {
         DegradedReason::BackendUnavailable => ModelDownloadError::BackendUnavailable,
-        DegradedReason::ProbeFailed => {
-            ModelDownloadError::ProbeFailed(probe_detail.unwrap_or_default())
-        }
+        DegradedReason::ProbeFailed => ModelDownloadError::ProbeFailed(probe_detail),
         DegradedReason::NotInstalled | DegradedReason::Disabled => {
             unreachable!(
                 "loader with cache=Some cannot produce NotInstalled; Disabled is caller-only"
@@ -471,7 +470,7 @@ mod tests {
             || {},
         );
         match result {
-            Err(ModelDownloadError::ProbeFailed(detail)) => assert!(
+            Err(ModelDownloadError::ProbeFailed(Some(detail))) => assert!(
                 detail.contains("backend down"),
                 "probe_detail should carry error message, got {detail:?}"
             ),
@@ -515,7 +514,7 @@ mod tests {
             || {},
         );
         match result {
-            Err(ModelDownloadError::ProbeFailed(detail)) => assert!(
+            Err(ModelDownloadError::ProbeFailed(Some(detail))) => assert!(
                 detail.contains("alloc failed"),
                 "probe_detail should carry new_fn error message, got {detail:?}"
             ),
@@ -632,6 +631,21 @@ mod tests {
         assert!(
             note.contains("text search only"),
             "note must explain the fallback, got: {note}"
+        );
+    }
+
+    // T-034: probe_failed_display_distinguishes_detail_presence
+    #[test]
+    fn probe_failed_display_distinguishes_detail_presence() {
+        assert_eq!(
+            ModelDownloadError::ProbeFailed(None).to_string(),
+            "model probe failed; try again or re-download the model",
+            "None must render the no-detail wording"
+        );
+        assert_eq!(
+            ModelDownloadError::ProbeFailed(Some("hash mismatch".into())).to_string(),
+            "model probe failed: hash mismatch; try again or re-download the model",
+            "Some(detail) must embed the detail in the wording"
         );
     }
 }
