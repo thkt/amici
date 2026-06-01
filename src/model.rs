@@ -44,10 +44,12 @@ impl fmt::Display for DegradedReason {
 
 /// A degraded embedder, wrapping the [`DegradedReason`] that caused it.
 ///
-/// The Newtype moves the "embedder-specific, do not reuse for a reranker" contract from a
-/// doc comment into the type: [`EmbedderDegraded::user_note`] is reachable only from an
-/// `EmbedderDegraded`, so a reranker caller holding a bare [`DegradedReason`] cannot invoke
-/// it. No reranker-degraded equivalent exists yet because no consumer needs one.
+/// The Newtype keeps the embedder-specific note ([`EmbedderDegraded::user_note`]) from being
+/// reused for a reranker by accident: `user_note` lives only on `EmbedderDegraded`, so a bare
+/// [`DegradedReason`] (e.g. one returned by the reranker loader) cannot call it without an
+/// explicit, greppable `EmbedderDegraded(..)` wrap. The inner field is public because
+/// downstream constructs the value, so this is a visible opt-in, not a hard compile-time
+/// barrier. No reranker-degraded equivalent exists yet because no consumer needs one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EmbedderDegraded(pub DegradedReason);
 
