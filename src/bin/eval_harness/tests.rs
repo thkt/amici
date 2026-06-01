@@ -327,7 +327,7 @@ fn snapshot_for_envelope_test(schema: &str, kind: BaselineKind) -> BaselineSnaps
         kind,
         captured_with: "test".to_owned(),
         timestamp: "epoch:0".to_owned(),
-        model_id: "test/model".to_owned(),
+        model_id: RURI_V3_310M_MODEL_ID.to_owned(),
         model_revision: "rev".to_owned(),
         mlx_rs_version: "0.0.0".to_owned(),
         fixture_hash: "fnv1a64:0".to_owned(),
@@ -440,6 +440,25 @@ fn verify_baseline_rejects_committed_baseline_with_schema_version_1_2() {
         result,
         Err(EXIT_REGRESSION),
         "FR-023/NFR-005: stale 1.2 baseline must EXIT_REGRESSION"
+    );
+}
+
+// T-062-027: verify_baseline_rejects_committed_baseline_with_model_id_mismatch
+//
+// RC-002: a baseline captured with a different embedding model must
+// EXIT_REGRESSION, not silently compare metrics across models. model_id
+// joins schema_version / kind / metric-k as an envelope contract gate so a
+// rurico model bump that changes RURI_V3_310M_MODEL_ID forces regeneration.
+#[test]
+fn verify_baseline_rejects_committed_baseline_with_model_id_mismatch() {
+    let mut snap = snapshot_for_envelope_test(BASELINE_SCHEMA_VERSION, BaselineKind::Forward);
+    snap.model_id = "cl-nagoya/ruri-v3-30m".to_owned();
+    let kvs = HashMap::new();
+    let result = validate_committed_baseline_envelope(&snap, &kvs);
+    assert_eq!(
+        result,
+        Err(EXIT_REGRESSION),
+        "RC-002: committed baseline from a different embedding model must EXIT_REGRESSION"
     );
 }
 

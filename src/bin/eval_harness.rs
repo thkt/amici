@@ -181,6 +181,11 @@ const MLX_RS_VERSION: &str = "0.25";
 /// `rurico::embed::ModelId::revision` (private); this label is what the
 /// baseline.json carries for provenance.
 const RURI_V3_310M_REVISION: &str = "pinned-via-rurico-embed-cache";
+/// Pinned ruri-v3-310m HuggingFace repo id. The canonical value lives in
+/// `rurico::embed::ModelId::repo_id` (only reachable via the crate-private
+/// `ModelArtifact` trait); this label is what baseline.json carries and what
+/// download / run logs print for provenance.
+const RURI_V3_310M_MODEL_ID: &str = "cl-nagoya/ruri-v3-310m";
 
 /// IR metric function signature shared by [`build_global_metrics`] and
 /// [`build_one_metric`]; aliased to silence `clippy::type_complexity`.
@@ -1181,7 +1186,7 @@ fn build_baseline_snapshot(
         kind,
         captured_with: captured_with.to_owned(),
         timestamp,
-        model_id: embed::ModelId::default().repo_id().to_owned(),
+        model_id: RURI_V3_310M_MODEL_ID.to_owned(),
         model_revision: RURI_V3_310M_REVISION.to_owned(),
         mlx_rs_version: MLX_RS_VERSION.to_owned(),
         fixture_hash,
@@ -1225,6 +1230,15 @@ fn validate_committed_baseline_envelope(
              regenerate via {{capture-baseline | capture-oracle | replay-first-search}} \
              before verifying",
             committed.schema_version, BASELINE_SCHEMA_VERSION
+        );
+        return Err(EXIT_REGRESSION);
+    }
+    if committed.model_id != RURI_V3_310M_MODEL_ID {
+        eprintln!(
+            "verify-baseline: failed — committed model_id {:?} does not match harness {:?}; \
+             the baseline was captured with a different embedding model — regenerate via \
+             {{capture-baseline | capture-oracle | replay-first-search}} before verifying",
+            committed.model_id, RURI_V3_310M_MODEL_ID
         );
         return Err(EXIT_REGRESSION);
     }
@@ -1452,9 +1466,8 @@ fn log_run_context<E: Embed, R: Rerank>(
     let kind_part = kind.map_or_else(String::new, |k| format!(" kind={k}"));
     let path_part = path.map_or_else(String::new, |p| format!(" path={}", p.display()));
     eprintln!(
-        "{mode}: fixture={}{kind_part}{path_part} model={} seed_shuffle={SHUFFLE_SEED} seed_bootstrap={BOOTSTRAP_SEED}",
+        "{mode}: fixture={}{kind_part}{path_part} model={RURI_V3_310M_MODEL_ID} seed_shuffle={SHUFFLE_SEED} seed_bootstrap={BOOTSTRAP_SEED}",
         ctx.fixture_dir.display(),
-        embed::ModelId::default().repo_id(),
     );
 }
 
@@ -1529,15 +1542,12 @@ fn load_fixture_for_kind(
 }
 
 fn init_embedder() -> Result<embed::Embedder, String> {
-    let model_id = embed::ModelId::default();
+    let model_id = embed::ModelId::DEFAULT;
     let artifacts =
         match embed::cached_artifacts(model_id).map_err(|e| format!("embed cache lookup: {e}"))? {
             Some(a) => a,
             None => {
-                eprintln!(
-                    "embed model not cached, downloading {}...",
-                    model_id.repo_id()
-                );
+                eprintln!("embed model not cached, downloading {RURI_V3_310M_MODEL_ID}...");
                 embed::download_model(model_id).map_err(|e| format!("embed download: {e}"))?
             }
         };

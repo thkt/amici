@@ -219,3 +219,18 @@ fn default_logging_preset_returns_arc_embed() {
     );
     assert!(result.is_ok(), "default-logging preset should succeed");
 }
+
+// T-118: default_logging_reports_not_installed_with_empty_cache
+//
+// Exercises the production cache_check closure (real `cached_artifacts`) in
+// `try_load_embedder_default_logging`: an empty HF cache yields
+// `NotInstalled` with no network. Covers the bootstrap wiring that the
+// `_with_fns` tests mock out.
+#[test]
+fn default_logging_reports_not_installed_with_empty_cache() {
+    let hub = tempfile::tempdir().expect("tempdir");
+    temp_env::with_var("HF_HOME", Some(hub.path()), || {
+        let result = try_load_embedder_default_logging();
+        assert_eq!(result.err(), Some(DegradedReason::NotInstalled));
+    });
+}
