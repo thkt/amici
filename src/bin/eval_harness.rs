@@ -1233,6 +1233,15 @@ fn validate_committed_baseline_envelope(
         );
         return Err(EXIT_REGRESSION);
     }
+    if committed.model_id != RURI_V3_310M_MODEL_ID {
+        eprintln!(
+            "verify-baseline: failed — committed model_id {:?} does not match harness {:?}; \
+             the baseline was captured with a different embedding model — regenerate via \
+             {{capture-baseline | capture-oracle | replay-first-search}} before verifying",
+            committed.model_id, RURI_V3_310M_MODEL_ID
+        );
+        return Err(EXIT_REGRESSION);
+    }
     for metric in &committed.global {
         if let Some(spec) = MetricSpec::ALL.iter().find(|s| s.name() == metric.name)
             && metric.k != spec.k()
