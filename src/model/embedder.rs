@@ -5,7 +5,7 @@ use rurico::embed::{Artifacts, Embed, Embedder, ModelId, cached_artifacts};
 use rurico::model_init::ModelInitError;
 use rurico::model_probe::ProbeStatus;
 
-pub use super::{DegradedReason, degraded_reason_user_note};
+pub use super::{DegradedReason, EmbedderDegraded};
 
 /// Try to load the embedding model.
 ///

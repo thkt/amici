@@ -42,24 +42,34 @@ impl fmt::Display for DegradedReason {
     }
 }
 
-/// Returns a short user-facing note for a degraded embedder,
-/// or `None` if no message should be shown (e.g. the caller explicitly disabled the model).
+/// A degraded embedder, wrapping the [`DegradedReason`] that caused it.
 ///
-/// `download_cmd` is interpolated into the [`DegradedReason::NotInstalled`] note so the
-/// caller can surface the binary-specific recovery action (e.g. `"yomu model download"`).
-/// Other variants ignore `download_cmd` because their cause is not addressable by
-/// re-downloading the model.
-///
-/// The wording is embedder-specific. Reranker callers should not reuse this fn;
-/// no reranker-degraded note helper exists yet because no consumer needs one.
-pub fn degraded_reason_user_note(reason: DegradedReason, download_cmd: &str) -> Option<String> {
-    match reason {
-        DegradedReason::Disabled => None,
-        DegradedReason::NotInstalled => Some(format!(
-            "embedding model not installed; run `{download_cmd}` to enable semantic search"
-        )),
-        DegradedReason::BackendUnavailable | DegradedReason::ProbeFailed => {
-            Some("embedding model unavailable; results from text search only".into())
+/// The Newtype keeps the embedder-specific note ([`EmbedderDegraded::user_note`]) from being
+/// reused for a reranker by accident: `user_note` lives only on `EmbedderDegraded`, so a bare
+/// [`DegradedReason`] (e.g. one returned by the reranker loader) cannot call it without an
+/// explicit, greppable `EmbedderDegraded(..)` wrap. The inner field is public because
+/// downstream constructs the value, so this is a visible opt-in, not a hard compile-time
+/// barrier. No reranker-degraded equivalent exists yet because no consumer needs one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EmbedderDegraded(pub DegradedReason);
+
+impl EmbedderDegraded {
+    /// Returns a short user-facing note for this degraded embedder,
+    /// or `None` if no message should be shown (e.g. the caller explicitly disabled the model).
+    ///
+    /// `download_cmd` is interpolated into the [`DegradedReason::NotInstalled`] note so the
+    /// caller can surface the binary-specific recovery action (e.g. `"yomu model download"`).
+    /// Other variants ignore `download_cmd` because their cause is not addressable by
+    /// re-downloading the model.
+    pub fn user_note(self, download_cmd: &str) -> Option<String> {
+        match self.0 {
+            DegradedReason::Disabled => None,
+            DegradedReason::NotInstalled => Some(format!(
+                "embedding model not installed; run `{download_cmd}` to enable semantic search"
+            )),
+            DegradedReason::BackendUnavailable | DegradedReason::ProbeFailed => {
+                Some("embedding model unavailable; results from text search only".into())
+            }
         }
     }
 }
