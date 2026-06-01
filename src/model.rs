@@ -287,7 +287,7 @@ pub fn download_and_verify_model() -> Result<(), ModelDownloadError> {
         |update| {
             try_download_and_verify_with_fns(
                 || {
-                    download_model(ModelId::default()).map_err(|e| {
+                    download_model(ModelId::DEFAULT).map_err(|e| {
                         tracing::error!(error = %e, "model download failed");
                         e
                     })

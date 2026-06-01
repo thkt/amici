@@ -1905,7 +1905,7 @@ dependencies = [
 [[package]]
 name = "rurico"
 version = "0.2.0"
-source = "git+https://github.com/thkt/rurico?rev=a573655#a573655f0a811deeae96f87640d28fcd117dec7b"
+source = "git+https://github.com/thkt/rurico?rev=c862123#c86212351cd297356abe4298c0688871d5808c4f"
 dependencies = [
  "bytemuck",
  "hf-hub",
@@ -1923,7 +1923,7 @@ dependencies = [
 [[package]]
 name = "rurico-ffi"
 version = "0.1.0"
-source = "git+https://github.com/thkt/rurico?rev=a573655#a573655f0a811deeae96f87640d28fcd117dec7b"
+source = "git+https://github.com/thkt/rurico?rev=c862123#c86212351cd297356abe4298c0688871d5808c4f"
 dependencies = [
  "mlx-sys",
  "rusqlite",
