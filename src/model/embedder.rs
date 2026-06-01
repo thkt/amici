@@ -62,12 +62,7 @@ pub fn try_load_embedder_with<CE>(
 /// ```
 pub fn try_load_embedder_default_logging() -> Result<Arc<dyn Embed>, DegradedReason> {
     try_load_embedder_default_logging_with_fns(
-        || {
-            cached_artifacts(ModelId::DEFAULT).map_err(|e| {
-                tracing::warn!(error = %e, model_kind = "embed", "embed cache lookup failed");
-                e
-            })
-        },
+        || cached_artifacts(ModelId::DEFAULT),
         Embedder::probe,
         Embedder::new,
         Artifacts::delete_files,

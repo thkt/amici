@@ -90,27 +90,6 @@ pub enum PipelineError {
         /// Identifier of the corpus document with no chunks.
         doc_id: String,
     },
-    /// Embedder returned a [`ChunkedEmbedding`](rurico::embed::ChunkedEmbedding)
-    /// whose `chunks` and `chunk_ids` vectors disagree on length.
-    ///
-    /// `ChunkedEmbedding::try_new` enforces non-emptiness, but its `chunks()`
-    /// / `chunk_ids()` accessors expose two slices whose lengths are not
-    /// statically tied. Without this guard the per-chunk `zip` would silently
-    /// stop at the shorter vector and either drop chunks (recall regression)
-    /// or insert zero rows for a doc with chunks-but-no-ids (vec table
-    /// mismatch).
-    #[error(
-        "pipeline chunk_id metadata length mismatch for doc {doc_id:?}: \
-         {chunks} chunks vs {chunk_ids} chunk_ids"
-    )]
-    ChunkIdLengthMismatch {
-        /// Identifier of the corpus document with mismatched metadata.
-        doc_id: String,
-        /// `chunks.len()` reported by the embedder.
-        chunks: usize,
-        /// `chunk_ids.len()` reported by the embedder.
-        chunk_ids: usize,
-    },
     /// A per-document chunk vector did not have [`EMBEDDING_DIMS`] elements.
     ///
     /// Surfaces a [`ChunkedEmbedding::chunks`](rurico::embed::ChunkedEmbedding)
@@ -387,13 +366,6 @@ fn index_corpus<E: Embed>(
             if chunked_embedding.chunks().is_empty() {
                 return Err(PipelineError::EmptyEmbedding {
                     doc_id: doc.id.clone(),
-                });
-            }
-            if chunked_embedding.chunks().len() != chunked_embedding.chunk_ids().len() {
-                return Err(PipelineError::ChunkIdLengthMismatch {
-                    doc_id: doc.id.clone(),
-                    chunks: chunked_embedding.chunks().len(),
-                    chunk_ids: chunked_embedding.chunk_ids().len(),
                 });
             }
             for (chunk_vec, chunk_id) in chunked_embedding
