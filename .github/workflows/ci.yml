@@ -93,8 +93,11 @@ jobs:
         with:
           tool: cargo-llvm-cov
 
+      # 分離した test module (module/tests.rs) を lcov から除外する。#[cfg(test)] 内の
+      # 防御アーム (panic!/unreachable! 等、test 成功時に実行されない行) を diff coverage
+      # gate が uncovered な変更行として数え誤発火させる blind spot を避けるため (#127)。
       - name: Generate lcov coverage
-        run: cargo llvm-cov --all-features --lcov --output-path lcov.info
+        run: cargo llvm-cov --all-features --lcov --output-path lcov.info --ignore-filename-regex '/tests\.rs$'
 
       - name: Diff coverage gate (changed lines >= 95%)
         run: |
