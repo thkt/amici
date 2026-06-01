@@ -93,11 +93,15 @@ jobs:
         with:
           tool: cargo-llvm-cov
 
-      # 分離した test module (module/tests.rs) を lcov から除外する。#[cfg(test)] 内の
-      # 防御アーム (panic!/unreachable! 等、test 成功時に実行されない行) を diff coverage
-      # gate が uncovered な変更行として数え誤発火させる blind spot を避けるため (#127)。
+      # diff coverage gate から「unit test 対象外の層」を lcov から除外する。
+      # プロジェクトの testable-layering (STRUCTURE.md: I/O wiring は integration、
+      # Logic のみ unit) に gate を合わせ、機械的変更の誤発火を防ぐ:
+      #   - **/tests.rs         : #[cfg(test)] 内の防御アーム (test 成功時に未実行) (#127)
+      #   - model/download.rs   : I/O 合成ルート (実 network DL + on-device probe)。
+      #                           wiring する logic は try_download_and_verify_with_fns で被覆
+      #   - bin/eval_harness.rs : eval/benchmark tooling (実モデルロード)。logic は test suite で被覆
       - name: Generate lcov coverage
-        run: cargo llvm-cov --all-features --lcov --output-path lcov.info --ignore-filename-regex '/tests\.rs$'
+        run: cargo llvm-cov --all-features --lcov --output-path lcov.info --ignore-filename-regex '(/tests\.rs$|/model/download\.rs$|/bin/eval_harness\.rs$)'
 
       - name: Diff coverage gate (changed lines >= 95%)
         id: diff_coverage
