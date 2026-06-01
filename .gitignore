@@ -5,6 +5,7 @@
 target/
 workspace/
 
-# Coverage artifacts (cargo llvm-cov)
+# Coverage artifacts (cargo llvm-cov / diff-cover)
 *.profraw
 /lcov.info
+/diff-cover-report.html

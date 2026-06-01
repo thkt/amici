@@ -100,15 +100,33 @@ jobs:
         run: cargo llvm-cov --all-features --lcov --output-path lcov.info --ignore-filename-regex '/tests\.rs$'
 
       - name: Diff coverage gate (changed lines >= 95%)
+        id: diff_coverage
         run: |
           git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
           # diff-cover is a Python tool; isolate it in a venv to avoid PEP 668
           # (externally-managed environments) regardless of the runner's Python.
           python3 -m venv /tmp/diff-cover-venv
           /tmp/diff-cover-venv/bin/pip install --quiet diff-cover
+          # diff-cover writes the HTML report before applying --fail-under, so the
+          # report exists for the upload step below even when this gate fails.
+          # (--html-report is deprecated in diff-cover 10.x; use --format html:.)
           /tmp/diff-cover-venv/bin/diff-cover lcov.info \
             --compare-branch=origin/main \
+            --format html:diff-cover-report.html \
             --fail-under=95
+
+      - name: Upload diff coverage report
+        # On gate failure the report pinpoints which changed lines are uncovered,
+        # so a reviewer need not open the raw job log (#134). Scoped to the gate
+        # step's own failure so an upstream failure (e.g. lcov generation) does not
+        # trigger an empty upload; if-no-files-found:error then asserts the report
+        # really was written.
+        if: ${{ failure() && steps.diff_coverage.conclusion == 'failure' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: diff-coverage-report
+          path: diff-cover-report.html
+          if-no-files-found: error
 
   security:
     runs-on: ubuntu-latest
