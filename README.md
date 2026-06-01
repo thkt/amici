@@ -4,19 +4,19 @@ Shared model-loading, storage helpers, and CLI utilities for the sae/yomu/recall
 
 ## Modules
 
-| Module | Contents |
-| ------ | -------- |
-| `model` | `DegradedReason`, `degraded_reason_user_note`, `degrade_with_warn`, `record_degraded`, `ModelLoad<T>`, `ModelDownloadError`, `download_and_verify_model` |
-| `model::embedder` | `try_load_embedder_with`, `try_load_embedder_default_logging` — loads the embedding model |
-| `model::reranker` | `try_load_reranker_with` — loads the reranking model |
-| `storage::filter` | `in_placeholders`, `anon_placeholders`, `as_sql_params`, `append_eq_filter`, … — SQL `WHERE` clause and parameter builders |
-| `storage::query_helpers` | `collect_rows`, `fetch_by_in_clause` — `Connection`-bound row collectors and IN-clause bulk fetch (generic over collection and error type) |
-| `storage::fts` | `clean_for_trigram` — adapts `rurico::storage::MatchFtsQuery` for an FTS5 `trigram` tokenizer |
-| `cli` | `Spinner`, `with_spinner`, `embed_with_spinners`, `done`, `try_expand_shorthand`, `env_lookup`, `CliError`, `exit_code::codes`, `exit_error`, `hint_arrow`, `info`, `deprecation_warn`, `progress_step` |
-| `migration` | `notify_schema_change` — unified `tracing::warn!` for schema-clear notices |
-| `logging` | `init_subscriber` — `RUST_LOG`-aware `tracing_subscriber::fmt` setup for CLI `main.rs` |
-| `eval` *(feature `eval-harness`)* | Search-evaluation harness composed with `rurico` primitives — backs the `eval_harness` binary (ADR 0002). |
-| `testing::hybrid` *(feature `test-support`)* | FTS↔vec symmetry contract assertion for hybrid search. |
+| Module                                       | Contents                                                                                                                                                                                                |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `model`                                      | `DegradedReason`, `EmbedderDegraded`, `degrade_with_warn`, `record_degraded`, `ModelLoad<T>`, `ModelDownloadError`, `download_and_verify_model`                                                         |
+| `model::embedder`                            | `try_load_embedder_with`, `try_load_embedder_default_logging` — loads the embedding model                                                                                                               |
+| `model::reranker`                            | `try_load_reranker_with` — loads the reranking model                                                                                                                                                    |
+| `storage::filter`                            | `in_placeholders`, `anon_placeholders`, `as_sql_params`, `append_eq_filter`, … — SQL `WHERE` clause and parameter builders                                                                              |
+| `storage::query_helpers`                     | `collect_rows`, `fetch_by_in_clause` — `Connection`-bound row collectors and IN-clause bulk fetch (generic over collection and error type)                                                              |
+| `storage::fts`                               | `clean_for_trigram` — adapts `rurico::storage::MatchFtsQuery` for an FTS5 `trigram` tokenizer                                                                                                           |
+| `cli`                                        | `Spinner`, `with_spinner`, `embed_with_spinners`, `done`, `try_expand_shorthand`, `env_lookup`, `CliError`, `exit_code::codes`, `exit_error`, `hint_arrow`, `info`, `deprecation_warn`, `progress_step` |
+| `migration`                                  | `notify_schema_change` — unified `tracing::warn!` for schema-clear notices                                                                                                                              |
+| `logging`                                    | `init_subscriber` — `RUST_LOG`-aware `tracing_subscriber::fmt` setup for CLI `main.rs`                                                                                                                  |
+| `eval` _(feature `eval-harness`)_            | Search-evaluation harness composed with `rurico` primitives — backs the `eval_harness` binary (ADR 0002).                                                                                               |
+| `testing::hybrid` _(feature `test-support`)_ | FTS↔vec symmetry contract assertion for hybrid search.                                                                                                                                                  |
 
 ## Usage
 
@@ -27,9 +27,9 @@ amici = { git = "https://github.com/thkt/amici", rev = "<rev>" }
 
 ## Features
 
-| Feature | Effect |
-| ------- | ------ |
-| `eval-harness` | Compiles `amici::eval` and the `eval_harness` binary. Required by `just eval-*` recipes. |
+| Feature        | Effect                                                                                                           |
+| -------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `eval-harness` | Compiles `amici::eval` and the `eval_harness` binary. Required by `just eval-*` recipes.                         |
 | `test-support` | Exposes `amici::testing::hybrid` so downstream `[dev-dependencies]` can reuse the hybrid-search contract helper. |
 
 ## CLI conventions
