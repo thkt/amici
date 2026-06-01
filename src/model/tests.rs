@@ -247,20 +247,21 @@ fn record_degraded_emits_warn_with_context() {
     );
 }
 
-// T-030: degraded_reason_user_note_returns_none_for_disabled
+// T-030: user_note_returns_none_for_disabled
 #[test]
-fn degraded_reason_user_note_returns_none_for_disabled() {
+fn user_note_returns_none_for_disabled() {
     assert_eq!(
-        degraded_reason_user_note(DegradedReason::Disabled, "any cmd"),
+        EmbedderDegraded(DegradedReason::Disabled).user_note("any cmd"),
         None,
         "Disabled is caller opt-out; suppress the note"
     );
 }
 
-// T-031: degraded_reason_user_note_injects_download_cmd_for_not_installed
+// T-031: user_note_injects_download_cmd_for_not_installed
 #[test]
-fn degraded_reason_user_note_injects_download_cmd_for_not_installed() {
-    let note = degraded_reason_user_note(DegradedReason::NotInstalled, "yomu model download")
+fn user_note_injects_download_cmd_for_not_installed() {
+    let note = EmbedderDegraded(DegradedReason::NotInstalled)
+        .user_note("yomu model download")
         .expect("NotInstalled must produce a note");
     assert!(
         note.contains("`yomu model download`"),
@@ -272,12 +273,12 @@ fn degraded_reason_user_note_injects_download_cmd_for_not_installed() {
     );
 }
 
-// T-032: degraded_reason_user_note_ignores_download_cmd_for_backend_unavailable
+// T-032: user_note_ignores_download_cmd_for_backend_unavailable
 #[test]
-fn degraded_reason_user_note_ignores_download_cmd_for_backend_unavailable() {
-    let note =
-        degraded_reason_user_note(DegradedReason::BackendUnavailable, "recall model download")
-            .expect("BackendUnavailable must produce a note");
+fn user_note_ignores_download_cmd_for_backend_unavailable() {
+    let note = EmbedderDegraded(DegradedReason::BackendUnavailable)
+        .user_note("recall model download")
+        .expect("BackendUnavailable must produce a note");
     assert!(
         !note.contains("recall model download"),
         "download_cmd must not leak into BackendUnavailable note, got: {note}"
@@ -288,10 +289,11 @@ fn degraded_reason_user_note_ignores_download_cmd_for_backend_unavailable() {
     );
 }
 
-// T-033: degraded_reason_user_note_ignores_download_cmd_for_probe_failed
+// T-033: user_note_ignores_download_cmd_for_probe_failed
 #[test]
-fn degraded_reason_user_note_ignores_download_cmd_for_probe_failed() {
-    let note = degraded_reason_user_note(DegradedReason::ProbeFailed, "sae model download")
+fn user_note_ignores_download_cmd_for_probe_failed() {
+    let note = EmbedderDegraded(DegradedReason::ProbeFailed)
+        .user_note("sae model download")
         .expect("ProbeFailed must produce a note");
     assert!(
         !note.contains("sae model download"),
