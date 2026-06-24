@@ -1844,35 +1844,55 @@ fn compute_latency_percentiles(results: &[QueryResult]) -> (f64, f64) {
     (latencies[p50_idx] as f64, latencies[p95_idx] as f64)
 }
 
-/// Opaque capture-time label in `epoch:N` form (Unix seconds since UNIX_EPOCH).
+/// Format `secs` (Unix seconds since UNIX_EPOCH) as the `epoch:N` capture-time
+/// label.
 ///
-/// Avoids pulling `chrono` into the dependency tree just for a strict
-/// ISO-8601 timestamp; producer-doc and consumer schema both reflect the
-/// actual format.
+/// ADR-0011: avoids pulling `chrono` into the dependency tree just for a strict
+/// ISO-8601 timestamp; producer-doc and consumer schema both reflect the actual
+/// format.
+fn epoch_label(secs: u64) -> String {
+    format!("epoch:{secs}")
+}
+
+/// Current time as an [`epoch_label`]; thin `SystemTime::now()` wrapper.
 fn capture_timestamp_label() -> String {
     let secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    format!("epoch:{secs}")
+    epoch_label(secs)
+}
+
+// FNV-1a 64-bit offset basis and prime, per the FNV spec:
+// https://www.isthe.com/chongo/tech/comp/fnv/#FNV-param
+const FNV1A64_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+const FNV1A64_PRIME: u64 = 0x0000_0100_0000_01b3;
+
+/// Fold `bytes` into a running FNV-1a 64-bit `hash`.
+///
+/// ADR-0011: hand-rolled to keep `sha2` out of the dependency graph — collision
+/// risk is acceptable for a fixture-changed signal, and the algorithm is a few
+/// lines. Accumulating so `hash_fixture_dir` can thread one hash across the
+/// three fixture files.
+fn fnv1a64_update(mut hash: u64, bytes: &[u8]) -> u64 {
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(FNV1A64_PRIME);
+    }
+    hash
 }
 
 /// FNV-1a 64-bit hash over the three fixture JSONL files. Used as the
-/// `fixture_hash` field on [`BaselineSnapshot`]; sha2 is intentionally avoided
-/// to keep the dependency graph small (collision risk is acceptable for a
-/// fixture-changed signal). Returns a typed error rather than swallowing the
-/// `fs::read` failure so a missing fixture surfaces at capture time instead
-/// of silently producing a misleading hash.
+/// `fixture_hash` field on [`BaselineSnapshot`]. Returns a typed error rather
+/// than swallowing the `fs::read` failure so a missing fixture surfaces at
+/// capture time instead of silently producing a misleading hash.
 fn hash_fixture_dir(fixture_dir: &Path) -> Result<String, String> {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut hash = FNV1A64_OFFSET;
     for name in ["documents.jsonl", "queries.jsonl", "known_answers.jsonl"] {
         let path = fixture_dir.join(name);
         let content = fs::read(&path)
             .map_err(|e| format!("hash_fixture_dir: read {} failed: {e}", path.display()))?;
-        for byte in &content {
-            hash ^= u64::from(*byte);
-            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-        }
+        hash = fnv1a64_update(hash, &content);
     }
     Ok(format!("fnv1a64:{hash:016x}"))
 }

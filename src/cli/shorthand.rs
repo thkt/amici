@@ -40,6 +40,10 @@ pub fn try_expand_shorthand(
     }
 }
 
+/// Optimal String Alignment (restricted Damerau-Levenshtein) edit distance.
+///
+/// ADR-0011: hand-rolled to avoid a `strsim` dependency for a ~20-line DP;
+/// correctness is pinned by the unit tests in `shorthand/tests.rs`.
 fn osa_distance(a: &str, b: &str) -> usize {
     let a: Vec<char> = a.chars().collect();
     let b: Vec<char> = b.chars().collect();

@@ -556,3 +556,33 @@ fn verify_baseline_rejects_kind_mismatch() {
         "FR-024/AC-7: kind mismatch (forward baseline + kind=replay) must EXIT_REGRESSION"
     );
 }
+
+#[test]
+fn fnv1a64_matches_known_answer_vectors() {
+    // ADR-0011: pin the hand-rolled FNV-1a 64 against canonical test vectors so
+    // a regression in the hand-roll is caught without depending on sha2.
+    assert_eq!(fnv1a64_update(FNV1A64_OFFSET, b""), 0xcbf2_9ce4_8422_2325);
+    assert_eq!(fnv1a64_update(FNV1A64_OFFSET, b"a"), 0xaf63_dc4c_8601_ec8c);
+    assert_eq!(
+        fnv1a64_update(FNV1A64_OFFSET, b"foobar"),
+        0x8594_4171_f739_67e8
+    );
+}
+
+#[test]
+fn fnv1a64_update_accumulates_across_chunks() {
+    // hash_fixture_dir threads one hash across successive file reads; chunked
+    // folding must equal hashing the concatenation (associativity).
+    let split = fnv1a64_update(fnv1a64_update(FNV1A64_OFFSET, b"foo"), b"bar");
+    let whole = fnv1a64_update(FNV1A64_OFFSET, b"foobar");
+    assert_eq!(split, whole);
+}
+
+#[test]
+fn epoch_label_formats_seconds_as_epoch_prefix() {
+    // ADR-0011: pin the `epoch:N` wire shape the consumer schema parses, so a
+    // drift away from the chrono-free format is caught without faking the clock.
+    assert_eq!(epoch_label(0), "epoch:0");
+    assert_eq!(epoch_label(42), "epoch:42");
+    assert_eq!(epoch_label(1_700_000_000), "epoch:1700000000");
+}

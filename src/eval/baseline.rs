@@ -208,7 +208,7 @@ pub struct BaselineSnapshot {
     /// symmetric provenance schema.
     pub captured_with: String,
     /// Capture-time label in `epoch:N` form (Unix seconds since UNIX_EPOCH).
-    /// Avoids pulling `chrono` in just for an ISO-8601 timestamp.
+    /// ADR-0011: avoids pulling `chrono` in just for an ISO-8601 timestamp.
     pub timestamp: String,
     /// Hugging Face repo id of the embed model used.
     pub model_id: String,
