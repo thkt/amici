@@ -50,3 +50,17 @@ fn global_flag_hoisted_with_trailing_options() {
     let s: Vec<&str> = exp.iter().filter_map(|a| a.to_str()).collect();
     assert_eq!(s, ["sae", "--json", "search", "query", "--limit", "2"]);
 }
+
+#[test]
+fn osa_distance_measures_edits_including_transposition() {
+    // ADR-0011: pins the hand-rolled OSA distance correctness so a regression
+    // is caught without a strsim dependency.
+    assert_eq!(osa_distance("search", "search"), 0);
+    assert_eq!(osa_distance("serch", "search"), 1);
+    // Two transposition vectors so neither alone pins the OSA-specific arm
+    // (plain Levenshtein scores both as 2): removing the arm regresses both.
+    assert_eq!(osa_distance("seacrh", "search"), 1);
+    assert_eq!(osa_distance("ab", "ba"), 1);
+    assert_eq!(osa_distance("", "abc"), 3);
+    assert_eq!(osa_distance("kitten", "sitting"), 3);
+}

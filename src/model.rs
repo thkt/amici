@@ -20,6 +20,12 @@ use crate::cli::{hint, warning};
 ///
 /// `Disabled` is reserved for caller-level opt-out (e.g. an environment variable);
 /// the loader functions never produce it.
+///
+/// ADR-0009: a typed error is converted into this enum only through
+/// [`degrade_with_warn`] (cause present) or [`record_degraded`] (no cause) —
+/// never a bare `.map_err(|_| DegradedReason::X)`, which erases the cause from
+/// the warn event. The source scan in `tests/adr_0009_degraded_routing_gate.rs`
+/// denies the bare pattern, making this the mechanical gate the ADR specifies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DegradedReason {
     /// Caller explicitly disabled the model (e.g. via an environment variable or config flag).

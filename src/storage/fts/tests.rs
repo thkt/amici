@@ -104,3 +104,54 @@ fn accepts_live_prepare_match_query_output() {
         Some("\"hello\" \"world\"")
     );
 }
+
+#[test]
+fn parse_fts_segments_recovers_rurico_or_group_wire_format() {
+    // ADR-0008 round-trip: rurico is the producer-of-truth for the MATCH wire
+    // format. A vocab-expanded short term ("au") makes rurico emit a
+    // `( "audit" OR "authentication" OR "authorization" )` OR-group joined by
+    // `" AND "` to the fixed `"login"`. amici's parse_fts_segments must recover
+    // that group and the fixed term. If rurico drifts the `" OR "` separator,
+    // the `( )` wrapping, or the `"..."` quoting, the recovered segments diverge
+    // and this test fails on the next rev bump.
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE VIRTUAL TABLE fts_chunks USING fts5(content);
+         INSERT INTO fts_chunks(content) VALUES ('authentication login session');
+         INSERT INTO fts_chunks(content) VALUES ('authorization permission role');
+         INSERT INTO fts_chunks(content) VALUES ('audit logging trace');
+         CREATE VIRTUAL TABLE fts_chunks_vocab USING fts5vocab(fts_chunks, row);",
+    )
+    .unwrap();
+
+    let matched = prepare_match_query(
+        &conn,
+        "au login",
+        "fts_chunks_vocab",
+        &QueryNormalizationConfig::default(),
+    )
+    .unwrap();
+
+    // Precondition: rurico actually emitted the OR-group wire format.
+    let wire = matched.as_str();
+    assert!(wire.contains(" OR "), "expected OR-group separator: {wire}");
+    assert!(wire.contains('('), "expected OR-group parens: {wire}");
+
+    let (fixed, or_groups) = parse_fts_segments(wire);
+
+    assert_eq!(fixed, vec!["\"login\"".to_owned()]);
+    assert_eq!(or_groups.len(), 1, "one expanded OR-group: {wire}");
+    // Term order within the group is unspecified — vocab expansion orders by
+    // `cnt DESC` then sqlite row order, so the consumer treats it as a set.
+    // Sort before comparing membership.
+    let mut group = or_groups[0].clone();
+    group.sort();
+    assert_eq!(
+        group,
+        vec![
+            "\"audit\"".to_owned(),
+            "\"authentication\"".to_owned(),
+            "\"authorization\"".to_owned(),
+        ]
+    );
+}

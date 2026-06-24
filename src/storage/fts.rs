@@ -1,4 +1,12 @@
 //! FTS5 trigram tokenizer adapters for `rurico::storage::MatchFtsQuery` output.
+//!
+//! ADR-0008: the MATCH wire format parsed here is a cross-repo contract with
+//! rurico, the producer. `parse_fts_segments` depends on `"..."`-quoted fixed
+//! terms and the `" OR "` separator inside `( ... )` OR-groups emitted by
+//! `rurico::storage::prepare_match_query`. rurico's compiler and tests do not
+//! catch a serialization change, so a rev bump that drifts the format is caught
+//! only by the round-trip test in `fts/tests.rs`. Keep this parser in sync with
+//! the producer.
 
 use rurico::storage::MatchFtsQuery;
 
@@ -67,6 +75,13 @@ fn clean_impl(match_query: &str) -> Option<String> {
     )
 }
 
+/// Split a cleaned MATCH string into `(fixed_terms, or_groups)`.
+///
+/// ADR-0008: parses rurico's wire format directly. `"..."` quoting and the
+/// `" OR "` separator inside `( ... )` groups are the pinned contract; the
+/// top-level `" AND "` rurico emits between terms is ignored (any non-quote,
+/// non-paren run is skipped). A producer-side change to quoting or the OR
+/// separator silently breaks this recovery — see the module-doc.
 fn parse_fts_segments(cleaned: &str) -> (Vec<String>, Vec<Vec<String>>) {
     let mut fixed: Vec<String> = Vec::new();
     let mut or_groups: Vec<Vec<String>> = Vec::new();

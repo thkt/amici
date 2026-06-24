@@ -4,15 +4,19 @@ This directory contains important decisions about the project's architecture.
 
 ## ADR List
 
-| Number | Title | Status | Date |
-|--------|-------|--------|------|
-| [0001](0001-extract-shared-model-loading-and-cli-utilities-into-amici-crate.md) | Extract Shared Model-Loading and CLI Utilities into amici Crate | accepted | 2026-04-13 |
-| [0002](0002-evaluation-methodology.md) | Search Quality Evaluation Methodology | accepted | 2026-04-27 |
-| [0003](0003-add-pgr-style-first-search-offline-retrieval-benchmark.md) | Add pgr-style First-Search Offline Retrieval Benchmark | accepted | 2026-05-08 |
-| [0004](0004-annotation-framework.md) | Annotation Framework Foundation | proposed | 2026-05-08 |
-| [0005](0005-model-wiring-belongs-to-rurico.md) | Place Model Wiring (lazy load, cache, probe) in rurico, Keep amici as Thin Composition Base | accepted | 2026-05-11 |
-| [0006](0006-pin-pipelinek10-as-part-of-baseline-schema-contract.md) | Pin PIPELINE_K=10 as part of baseline schema contract | proposed | 2026-05-14 |
-| [0007](0007-pin-baselinesnapshot-serde-defaults-to-pre-existing-behavior.md) | Pin BaselineSnapshot serde defaults to pre-existing behavior | proposed | 2026-05-14 |
+| Number                                                                          | Title                                                                                       | Status   | Date       |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | -------- | ---------- |
+| [0001](0001-extract-shared-model-loading-and-cli-utilities-into-amici-crate.md) | Extract Shared Model-Loading and CLI Utilities into amici Crate                             | accepted | 2026-04-13 |
+| [0002](0002-evaluation-methodology.md)                                          | Search Quality Evaluation Methodology                                                       | accepted | 2026-04-27 |
+| [0003](0003-add-pgr-style-first-search-offline-retrieval-benchmark.md)          | Add pgr-style First-Search Offline Retrieval Benchmark                                      | accepted | 2026-05-08 |
+| [0004](0004-annotation-framework.md)                                            | Annotation Framework Foundation                                                             | proposed | 2026-05-08 |
+| [0005](0005-model-wiring-belongs-to-rurico.md)                                  | Place Model Wiring (lazy load, cache, probe) in rurico, Keep amici as Thin Composition Base | accepted | 2026-05-11 |
+| [0006](0006-pin-pipelinek10-as-part-of-baseline-schema-contract.md)             | Pin PIPELINE_K=10 as part of baseline schema contract                                       | accepted | 2026-05-14 |
+| [0007](0007-pin-baselinesnapshot-serde-defaults-to-pre-existing-behavior.md)    | Pin BaselineSnapshot serde defaults to pre-existing behavior                                | accepted | 2026-05-14 |
+| [0008](0008-pin-the-fts5-trigram-wire-format-contract-with-rurico.md)           | Pin the FTS5 trigram wire-format contract with rurico                                       | accepted | 2026-06-24 |
+| [0009](0009-route-model-degraded-transitions-through-a-typed-contract.md)       | Route model-degraded transitions through a typed contract                                   | accepted | 2026-06-24 |
+| [0010](0010-gate-non-production-modules-behind-cargo-features.md)               | Gate non-production modules behind cargo features                                           | accepted | 2026-06-24 |
+| [0011](0011-prefer-hand-rolled-small-algorithms-over-new-dependencies.md)       | Prefer hand-rolled small algorithms over new dependencies                                   | accepted | 2026-06-24 |
 
 ## By Status
 
@@ -22,16 +26,20 @@ This directory contains important decisions about the project's architecture.
 - **0002**: Search Quality Evaluation Methodology
 - **0003**: Add pgr-style First-Search Offline Retrieval Benchmark
 - **0005**: Place Model Wiring (lazy load, cache, probe) in rurico, Keep amici as Thin Composition Base
+- **0006**: Pin PIPELINE_K=10 as part of baseline schema contract
+- **0007**: Pin BaselineSnapshot serde defaults to pre-existing behavior
+- **0008**: Pin the FTS5 trigram wire-format contract with rurico
+- **0009**: Route model-degraded transitions through a typed contract
+- **0010**: Gate non-production modules behind cargo features
+- **0011**: Prefer hand-rolled small algorithms over new dependencies
 
 ### Proposed
 
 - **0004**: Annotation Framework Foundation
-- **0006**: Pin PIPELINE_K=10 as part of baseline schema contract
-- **0007**: Pin BaselineSnapshot serde defaults to pre-existing behavior
 
 ## About MADR Format
 
-This project uses [MADR (Markdown Architecture Decision Records)](https://adr.github.io/madr/) format.
+This project uses [MADR (Markdown Any Decision Records)](https://adr.github.io/madr/) format, v4.
 
 ### How to Create an ADR
 
@@ -43,10 +51,11 @@ This project uses [MADR (Markdown Architecture Decision Records)](https://adr.gi
 
 - **Proposed**: Awaiting review
 - **Accepted**: Approved, implementing or completed
-- **Deprecated**: Better alternative found
-- **Superseded**: Replaced by another ADR
+- **Rejected**: Considered but not adopted
+- **Deprecated**: Retired without a replacement ADR
+- **Superseded**: Replaced by another ADR (e.g. `superseded by ADR-NNNN`)
 
 ---
 
-*Last updated: 2026-05-14*
-*Auto-generated by: update-index.sh*
+_Last updated: 2026-06-24_
+_Auto-generated by: update-index.py_
