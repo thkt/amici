@@ -58,20 +58,22 @@ fn as_ref_returns_inner_only_for_ready() {
     assert_eq!(ModelLoad::<i32>::Failed("e".into()).as_ref(), None);
 }
 
-// T-020: debug_output_contains_variant_name
+// T-020: Debug is hand-written (no `T: Debug` bound), so `ModelLoad<T>` is
+// Debug for any `T` and `Ready` hides its inner value. Using a non-Debug `T`
+// throughout pins the unconditional impl: a `#[derive(Debug)]` would reintroduce
+// the `T: Debug` bound (this test would stop compiling) and print the inner
+// value (the `Ready(...)` assertion would fail). The previous assertion only
+// matched variant-name substrings, which a derive also satisfies, so it pinned
+// neither property.
 #[test]
-fn debug_output_contains_variant_name() {
-    let ready = format!("{:?}", ModelLoad::Ready(1));
-    assert!(ready.contains("Ready"), "expected 'Ready', got: {ready}");
-    let absent = format!("{:?}", ModelLoad::<i32>::Absent);
-    assert!(
-        absent.contains("Absent"),
-        "expected 'Absent', got: {absent}"
-    );
-    let failed = format!("{:?}", ModelLoad::<i32>::Failed("msg".into()));
-    assert!(
-        failed.contains("Failed"),
-        "expected 'Failed', got: {failed}"
+fn debug_is_unconditional_and_hides_ready_inner() {
+    struct NoDebug;
+
+    assert_eq!(format!("{:?}", ModelLoad::Ready(NoDebug)), "Ready(...)");
+    assert_eq!(format!("{:?}", ModelLoad::<NoDebug>::Absent), "Absent");
+    assert_eq!(
+        format!("{:?}", ModelLoad::<NoDebug>::Failed("msg".into())),
+        "Failed(\"msg\")"
     );
 }
 

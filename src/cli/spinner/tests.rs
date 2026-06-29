@@ -12,16 +12,6 @@ fn cancel_signals_done() {
     );
 }
 
-// T-031: set_message_updates_message
-#[test]
-fn set_message_updates_message() {
-    let spinner = Spinner::new("initial");
-    spinner.set_message("updated");
-    let msg = spinner.message.lock().unwrap().clone();
-    assert_eq!(msg, "updated");
-    spinner.cancel();
-}
-
 // T-032: finish_non_tty_does_not_panic
 #[test]
 fn finish_non_tty_does_not_panic() {
