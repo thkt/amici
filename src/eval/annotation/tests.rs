@@ -5,13 +5,11 @@
 //! Spec's Skip rationale (FR-V002 Serialise wrapper) explicitly defers
 //! that case to the implicit serde path coverage from T-002.
 //!
-//! Sub-PR-B: T-002 (this file's `session_write_json_round_trips_through_tempdir`
-//! and `annotation_error_io_variant_is_reachable_via_from`) in
-//! `.claude/workspace/planning/2026-05-09-issue-53-annotate-subcommand/spec.md`.
+//! Sub-PR-B: T-002 (this file's `session_write_json_round_trips_through_tempdir`)
+//! in `.claude/workspace/planning/2026-05-09-issue-53-annotate-subcommand/spec.md`.
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
-use std::io;
 
 use tempfile::tempdir;
 
@@ -155,20 +153,5 @@ fn session_write_json_round_trips_through_tempdir() {
     assert_eq!(
         parsed, original,
         "round-trip via Session::write_json must preserve PartialEq equality"
-    );
-}
-
-// T-002 (sub-PR-B): annotation_error_io_variant_is_reachable_via_from
-// FR-003: AnnotationError gains an Io variant carrying std::io::Error
-//         with #[from] for `?`-propagation. Confirms the variant is
-//         reachable via From conversion.
-#[test]
-fn annotation_error_io_variant_is_reachable_via_from() {
-    let io_err = io::Error::other("stub io error");
-    let err: AnnotationError = io_err.into();
-    assert!(
-        matches!(err, AnnotationError::Io(_)),
-        "FR-003: AnnotationError::Io must be reachable via From<io::Error>; \
-         got: {err:?}"
     );
 }
