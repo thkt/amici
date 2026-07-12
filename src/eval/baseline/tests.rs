@@ -118,7 +118,7 @@ fn committed_baseline_json_deserialises_under_new_schema() {
         panic!(
             "committed baseline.json must deserialise under the current schema ({e}); \
                  update the fixture when bumping {BASELINE_SCHEMA_VERSION:?}. content head: {}",
-            &text.chars().take(200).collect::<String>()
+            text.chars().take(200).collect::<String>()
         )
     });
     assert_eq!(
